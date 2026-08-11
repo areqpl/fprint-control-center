@@ -1,11 +1,17 @@
 [Unit]
 Description=Fingerprint Control Center Service
 After=graphical-session.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/fprint-control-center
 Restart=on-failure
+RestartSec=3s
+Environment=PYTHONUNBUFFERED=1
+ProtectSystem=full
+PrivateTmp=true
 
 [Install]
 WantedBy=default.target
