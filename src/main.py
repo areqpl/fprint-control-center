@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-fprint-control-center v1.3.0: PyQt6 Ultra-Premium Desktop GUI & Daemon.
-Designed with high-end UI/UX standards:
- - TokyoNight / Modern Obsidian Glassmorphism Palette (WCAG AAA Contrast)
- - Visual Finger Chips & Status Badges
- - Custom Rounded Card Widgets with Subtle Borders & Hover Lighting
- - Asynchronous QThread Concurrency & Non-Blocking Subprocess Wizard
+fprint-control-center v1.4.0: PyQt6 Desktop GUI Control Center & Settings.
+Features:
+ - Multi-tab layout (Overview & Enrollment | CLI & PAM Settings)
+ - Verification Match Tester (runs fprintd-verify asynchronously)
+ - PAM & Sudo Integration Diagnostic Controls (/etc/pam.d/sudo)
+ - Hardware USB Autosuspend Power Tweak Manager (/etc/udev/rules.d/70-synaptics-fingerprint-power.rules)
+ - Quiet background workers (QThread) with zero log noise
 """
 
 import sys
@@ -25,7 +26,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QVBoxLayout,
     QWidget, QPushButton, QMessageBox, QHBoxLayout, QFrame,
     QSystemTrayIcon, QMenu, QDialog, QComboBox, QTextEdit,
-    QProgressBar, QGroupBox, QGridLayout, QScrollArea
+    QProgressBar, QGroupBox, QTabWidget
 )
 from PyQt6.QtCore import Qt, QSocketNotifier, QProcess, pyqtSignal, QObject, QThread
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QFont, QPen, QBrush
@@ -55,6 +56,28 @@ QMainWindow, QDialog {
     font-family: 'Inter', 'Segoe UI', 'SF Pro Display', sans-serif;
 }
 
+QTabWidget::pane {
+    border: 1px solid #24283b;
+    background-color: #0f0f17;
+    border-radius: 8px;
+}
+
+QTabBar::tab {
+    background-color: #1a1b26;
+    color: #a9b1d6;
+    padding: 10px 20px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    font-weight: 600;
+    margin-right: 4px;
+}
+
+QTabBar::tab:selected {
+    background-color: #24283b;
+    color: #7aa2f7;
+    border-bottom: 2px solid #7aa2f7;
+}
+
 QFrame#cardFrame {
     background-color: #1a1b26;
     border: 1px solid #24283b;
@@ -75,7 +98,6 @@ QLabel#mainHeader {
     font-size: 20px;
     font-weight: 800;
     color: #7aa2f7;
-    letter-spacing: 0.5px;
 }
 
 QLabel#cardTitle {
@@ -98,16 +120,6 @@ QLabel#badgeWarning {
     background-color: #3b2d1d;
     color: #e0af68;
     border: 1px solid #5d4428;
-    border-radius: 12px;
-    padding: 4px 10px;
-    font-weight: 700;
-    font-size: 11px;
-}
-
-QLabel#badgeInfo {
-    background-color: #1d2d3a;
-    color: #7dcfff;
-    border: 1px solid #29475c;
     border-radius: 12px;
     padding: 4px 10px;
     font-weight: 700;
@@ -161,11 +173,6 @@ QPushButton#btnPrimary:hover {
     background-color: #89b4fa;
 }
 
-QPushButton#btnPrimary:disabled {
-    background-color: #3b4261;
-    color: #565f89;
-}
-
 QPushButton#btnDanger {
     background-color: #1a1b26;
     color: #f7768e;
@@ -176,12 +183,6 @@ QPushButton#btnDanger {
 QPushButton#btnDanger:hover {
     background-color: #f7768e;
     color: #15161e;
-}
-
-QPushButton#btnDanger:disabled {
-    background-color: #1a1b26;
-    color: #565f89;
-    border-color: #3b4261;
 }
 
 QProgressBar {
@@ -213,7 +214,7 @@ QTextEdit {
     color: #9ece6a;
     border: 1px solid #24283b;
     border-radius: 8px;
-    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
     font-size: 12px;
     padding: 8px;
 }
@@ -269,7 +270,6 @@ class SingleInstanceLock:
         QLocalServer.removeServer(self.server_name)
         if not self.server.listen(self.server_name):
             raise SingleInstanceError("Failed to acquire single instance lock.")
-        logger.info("Single-instance lock acquired.")
 
     def release(self) -> None:
         if self.server.isListening():
@@ -324,7 +324,7 @@ def setup_exception_hook():
 
 
 # ==============================================================================
-# WORKER OBJECTS (PyQt6 QThread Concurrency Pattern)
+# ASYNCHRONOUS WORKER OBJECTS
 # ==============================================================================
 
 class StatusQueryWorker(QObject):
@@ -341,30 +341,32 @@ class StatusQueryWorker(QObject):
             "dev_name": "Synaptics Prometheus MIS Touch (06cb:00bd)",
             "dev_path": "/net/reactivated/Fprint/Device/0",
             "usb_power_optimized": False,
+            "pam_sudo_active": False,
             "enrolled_fingers": [],
-            "status_msg": "Operational"
         }
         try:
             rule_path = Path("/etc/udev/rules.d/70-synaptics-fingerprint-power.rules")
             result["usb_power_optimized"] = rule_path.is_file()
 
+            # PAM sudo check
             try:
-                dev_info = self.fprint_mgr.get_default_device()
-                result["dev_name"] = dev_info.get("name", "Synaptics Fingerprint Scanner")
-                result["dev_path"] = dev_info.get("path", "/net/reactivated/Fprint/Device/0")
-            except Exception as e_dev:
-                logger.warning(f"Device query fallback: {e_dev}")
+                pam_sudo = Path("/etc/pam.d/sudo")
+                if pam_sudo.is_file():
+                    result["pam_sudo_active"] = "pam_fprintd.so" in pam_sudo.read_text(errors="ignore")
+            except Exception:
+                pass
 
-            try:
-                fingers = self.fprint_mgr.list_enrolled_fingers(self.username)
-                result["enrolled_fingers"] = fingers
-            except Exception as e_fingers:
-                logger.warning(f"Enrolled query fallback: {e_fingers}")
+            # D-Bus / CLI queries
+            dev_info = self.fprint_mgr.get_default_device()
+            result["dev_name"] = dev_info.get("name", "Synaptics Fingerprint Scanner")
+            result["dev_path"] = dev_info.get("path", "/net/reactivated/Fprint/Device/0")
+
+            fingers = self.fprint_mgr.list_enrolled_fingers(self.username)
+            result["enrolled_fingers"] = fingers
 
             self.finished.emit(result)
 
         except Exception as exc:
-            logger.error(f"StatusQueryWorker exception: {exc}")
             self.error.emit(str(exc))
 
 
@@ -386,8 +388,36 @@ class TemplateResetWorker(QObject):
             self.finished.emit(False, str(exc))
 
 
+class VerifyWorker(QObject):
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, finger_code: str, username: str):
+        super().__init__()
+        self.finger_code = finger_code
+        self.username = username
+
+    def run_task(self):
+        try:
+            cmd = ["fprintd-verify"]
+            if self.finger_code:
+                cmd.extend(["-f", self.finger_code])
+            if self.username:
+                cmd.append(self.username)
+            
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            output = res.stdout + res.stderr
+            if "verify-match" in output.lower() or "matched" in output.lower():
+                self.finished.emit(True, "🎉 Fingerprint Verification Match SUCCESS!")
+            elif "verify-no-match" in output.lower():
+                self.finished.emit(False, "❌ Fingerprint Verification Failed: No match found.")
+            else:
+                self.finished.emit(False, f"Verification Result:\n{output.strip()}")
+        except Exception as exc:
+            self.finished.emit(False, f"Verification execution error: {exc}")
+
+
 # ==============================================================================
-# UI COMPONENTS & WINDOWS
+# UI COMPONENTS
 # ==============================================================================
 
 class EnrollmentDialog(QDialog):
@@ -519,9 +549,6 @@ class EnrollmentDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
-    """
-    High-End UX & UI Refined Control Center Window.
-    """
     def __init__(self, fprint_mgr: FprintManager, tray_icon: QSystemTrayIcon):
         super().__init__()
         self.fprint_mgr = fprint_mgr
@@ -534,8 +561,11 @@ class MainWindow(QMainWindow):
         self.reset_thread: Optional[QThread] = None
         self.reset_worker: Optional[TemplateResetWorker] = None
 
+        self.verify_thread: Optional[QThread] = None
+        self.verify_worker: Optional[VerifyWorker] = None
+
         self.setWindowTitle("Fingerprint Control Center")
-        self.setFixedSize(580, 520)
+        self.setFixedSize(620, 560)
         self.setStyleSheet(PREMIUM_STYLE)
 
         icon = get_app_icon()
@@ -563,7 +593,16 @@ class MainWindow(QMainWindow):
         title_box.addWidget(self.lbl_badge)
         main_layout.addLayout(title_box)
 
-        # CARD 1: Hardware & USB Power Optimization
+        # Tab Widget
+        self.tabs = QTabWidget()
+        
+        # TAB 1: OVERVIEW & ENROLLMENT
+        tab_overview = QWidget()
+        ov_layout = QVBoxLayout(tab_overview)
+        ov_layout.setSpacing(14)
+        ov_layout.setContentsMargins(14, 14, 14, 14)
+
+        # CARD 1: Hardware & Power
         card_hw = QFrame()
         card_hw.setObjectName("cardFrame")
         hw_layout = QVBoxLayout(card_hw)
@@ -585,7 +624,7 @@ class MainWindow(QMainWindow):
         hw_layout.addWidget(self.lbl_dev_name)
         hw_layout.addWidget(self.lbl_dev_path)
         hw_layout.addWidget(self.lbl_usb_power, alignment=Qt.AlignmentFlag.AlignLeft)
-        main_layout.addWidget(card_hw)
+        ov_layout.addWidget(card_hw)
 
         # CARD 2: Enrolled Fingerprints Visual Chips
         card_enrolled = QFrame()
@@ -597,7 +636,6 @@ class MainWindow(QMainWindow):
         lbl_enrolled_title.setObjectName("cardTitle")
         enrolled_layout.addWidget(lbl_enrolled_title)
 
-        # Container layout for chips
         self.chip_container = QWidget()
         self.chip_layout = QHBoxLayout(self.chip_container)
         self.chip_layout.setContentsMargins(0, 0, 0, 0)
@@ -610,7 +648,6 @@ class MainWindow(QMainWindow):
 
         enrolled_layout.addWidget(self.chip_container)
 
-        # Actions Toolbar inside Card 2
         act_layout = QHBoxLayout()
         self.btn_enroll = QPushButton("➕ Enroll New Finger")
         self.btn_enroll.setObjectName("btnPrimary")
@@ -624,7 +661,54 @@ class MainWindow(QMainWindow):
         act_layout.addWidget(self.btn_reset)
         enrolled_layout.addLayout(act_layout)
 
-        main_layout.addWidget(card_enrolled)
+        ov_layout.addWidget(card_enrolled)
+        self.tabs.addTab(tab_overview, "🖐️ Overview & Templates")
+
+        # TAB 2: CLI & PAM INTEGRATION SETTINGS
+        tab_settings = QWidget()
+        set_layout = QVBoxLayout(tab_settings)
+        set_layout.setSpacing(14)
+        set_layout.setContentsMargins(14, 14, 14, 14)
+
+        # CARD 3: PAM Authentication Status
+        card_pam = QFrame()
+        card_pam.setObjectName("cardFrame")
+        pam_layout = QVBoxLayout(card_pam)
+        pam_layout.setSpacing(8)
+
+        lbl_pam_title = QLabel("🔑 PAM & TERMINAL AUTHENTICATION INTEGRATION")
+        lbl_pam_title.setObjectName("cardTitle")
+        pam_layout.addWidget(lbl_pam_title)
+
+        self.lbl_pam_sudo = QLabel("Sudo PAM (/etc/pam.d/sudo): Checking...")
+        self.lbl_pam_sudo.setStyleSheet("font-weight: 600;")
+        pam_layout.addWidget(self.lbl_pam_sudo)
+
+        set_layout.addWidget(card_pam)
+
+        # CARD 4: Fingerprint Verification Match Test
+        card_test = QFrame()
+        card_test.setObjectName("cardFrame")
+        test_layout = QVBoxLayout(card_test)
+        test_layout.setSpacing(10)
+
+        lbl_test_title = QLabel("🧪 INTERACTIVE FINGERPRINT VERIFICATION TEST")
+        lbl_test_title.setObjectName("cardTitle")
+        test_layout.addWidget(lbl_test_title)
+
+        self.lbl_verify_status = QLabel("Press 'Test Verification' to test sensor match feedback.")
+        self.lbl_verify_status.setStyleSheet("color: #a9b1d6;")
+        test_layout.addWidget(self.lbl_verify_status)
+
+        self.btn_test_verify = QPushButton("🔍 Test Fingerprint Verification")
+        self.btn_test_verify.setObjectName("btnPrimary")
+        self.btn_test_verify.clicked.connect(self.run_verification_test)
+        test_layout.addWidget(self.btn_test_verify, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        set_layout.addWidget(card_test)
+        self.tabs.addTab(tab_settings, "⚙️ CLI & PAM Settings")
+
+        main_layout.addWidget(self.tabs)
 
         # Footer Navigation Bar
         footer_layout = QHBoxLayout()
@@ -646,7 +730,6 @@ class MainWindow(QMainWindow):
     # ASYNCHRONOUS WORKER SLOTS
     # --------------------------------------------------------------------------
     def refresh_status(self):
-        logger.info("Initiating status refresh...")
         self.btn_refresh.setEnabled(False)
         self.btn_refresh.setText("Refreshing...")
 
@@ -675,16 +758,22 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_usb_power.setText("⚠️ USB Power: Default (autosuspend may drop scans)")
             self.lbl_usb_power.setObjectName("badgeWarning")
-        self.lbl_usb_power.setStyleSheet("") # Force QSS refresh
+        self.lbl_usb_power.setStyleSheet("")
+
+        # PAM Sudo status
+        if data.get("pam_sudo_active"):
+            self.lbl_pam_sudo.setText("Sudo PAM (/etc/pam.d/sudo): 🔵 Active (pam_fprintd.so configured)")
+            self.lbl_pam_sudo.setStyleSheet("color: #73daca; font-weight: bold;")
+        else:
+            self.lbl_pam_sudo.setText("Sudo PAM (/etc/pam.d/sudo): ⚠️ Inactive")
+            self.lbl_pam_sudo.setStyleSheet("color: #e0af68;")
 
         # Device Info
         self.lbl_dev_name.setText(f"Device: {data.get('dev_name')}")
         self.lbl_dev_path.setText(f"D-Bus Path: {data.get('dev_path')}")
 
-        # Re-render Enrolled Finger Chips
+        # Enrolled Finger Chips
         fingers = data.get("enrolled_fingers", [])
-        
-        # Clear existing layout items
         while self.chip_layout.count():
             item = self.chip_layout.takeAt(0)
             widget = item.widget()
@@ -706,7 +795,34 @@ class MainWindow(QMainWindow):
     def on_status_error(self, err_msg: str):
         self.btn_refresh.setEnabled(True)
         self.btn_refresh.setText("🔄 Refresh Status")
-        logger.error(f"Status query error: {err_msg}")
+
+    def run_verification_test(self):
+        self.btn_test_verify.setEnabled(False)
+        self.btn_test_verify.setText("Testing... Scan finger")
+        self.lbl_verify_status.setText("▶ Touch fingerprint reader scanner now...")
+        self.lbl_verify_status.setStyleSheet("color: #7dcfff; font-weight: bold;")
+
+        self.verify_thread = QThread()
+        self.verify_worker = VerifyWorker("", self.username)
+        self.verify_worker.moveToThread(self.verify_thread)
+
+        self.verify_thread.started.connect(self.verify_worker.run_task)
+        self.verify_worker.finished.connect(self.on_verify_finished)
+
+        self.verify_worker.finished.connect(self.verify_thread.quit)
+        self.verify_worker.finished.connect(self.verify_worker.deleteLater)
+        self.verify_thread.finished.connect(self.verify_thread.deleteLater)
+
+        self.verify_thread.start()
+
+    def on_verify_finished(self, success: bool, message: str):
+        self.btn_test_verify.setEnabled(True)
+        self.btn_test_verify.setText("🔍 Test Fingerprint Verification")
+        self.lbl_verify_status.setText(message)
+        if success:
+            self.lbl_verify_status.setStyleSheet("color: #73daca; font-weight: bold;")
+        else:
+            self.lbl_verify_status.setStyleSheet("color: #f7768e; font-weight: bold;")
 
     def reset_templates(self):
         reply = QMessageBox.question(
