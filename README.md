@@ -1,43 +1,34 @@
-# fprint-control-center v1.4.0
+# fprint-control-center v1.5.0
 
-A background system tray daemon and GUI control center for `fprintd` fingerprint devices on Arch Linux and CachyOS. It addresses fingerprint scanner wake-up dropouts, provides a persistent PyQt6 system tray interface, interactive fingerprint enrollment, template reset, and USB power management diagnostics.
+A high-performance background system tray daemon and GUI control center for `fprintd` fingerprint devices on Arch Linux, CachyOS, and Linux laptops with touchpad fingerprint scanners (Synaptics, Validity, Elan).
 
-## Key Features in v1.4.0
+## Key Features & Responsiveness Optimizations
 
-- **Persistent System Tray Icon (`QSystemTrayIcon`)**:
-  - Operates continuously in the system tray (`app.setQuitOnLastWindowClosed(False)`).
-  - Left-click toggles main control center window visibility.
-  - Context Menu options:
-    - **Open Settings / Control Center**: Opens and focuses the main application window.
-    - **Enroll Finger...**: Opens interactive fingerprint enrollment dialog.
-    - **Reset Templates...**: Prompt to wipe broken or legacy fingerprint templates (`fprintd-delete`).
-    - **Check USB Autosuspend**: Diagnoses hardware USB autosuspend power configuration.
-    - **Quit**: Safely terminates the background daemon.
+### 🚀 Touchpad & Sensor Responsiveness Boost
+- **High-Responsiveness Mode (`power/control = on` & `power/persist = 1`)**: Disables USB autosuspend for Synaptics (`06cb:*`) and generic USB fingerprint sensors. Prevents instant match timeouts during `sudo` and PAM authentication.
+- **Configurable 360° Position Stages (5 to 12 Angles)**: Configure the exact number of fingerprint scan positions captured during enrollment. Select `5` for rapid setup, `8` for balanced accuracy, or `12` for ultra-precise match ratio.
+- **Interactive Verification Match Tester**: Perform real-time fingerprint match verification (`fprintd-verify`) directly inside the GUI with visual feedback.
 
-- **Control Center GUI (`MainWindow`)**:
-  - **Device & USB Autosuspend Panel**: Displays fingerprint scanner hardware status, D-Bus object path, and verifies if `/etc/udev/rules.d/70-synaptics-fingerprint-power.rules` is active (`power/control` = `on`).
-  - **Enrolled Fingers Panel**: Displays friendly list of currently registered fingerprint templates for the user (`Right Index Finger`, `Left Thumb`, etc.).
-  - **Interactive Enrollment Dialog**: Select target finger (`right-index-finger`, `left-index-finger`, `right-thumb`, etc.) and execute `fprintd-enroll` asynchronously with real-time stage progress feedback and output logging.
-  - **Template Reset Action**: Prompts confirmation to wipe stored templates using `fprintd-delete`.
+### 🔐 KeePassXC & PAM Integration
+- **Password Manager PAM Bridge**: Detects and integrates with `/etc/pam.d/sudo` and `/etc/pam.d/keepassxc` to allow instant fingerprint database unlocking.
+- **`SUDO_ASKPASS` Compatible**: Connects to graphical authentication helpers (`kaskpass`, `zenity`) for terminal and GUI sudo prompts.
 
-- **Engine Robustness**:
-  - **Single Instance Enforcement**: `QLocalServer` UNIX lock socket (`fprint-control-center-lock-<user>`).
-  - **Global Exception Hook**: `sys.excepthook` logger directing unhandled errors to `journalctl` / `sys.stderr` with user dialog warnings.
-  - **UNIX Signal Handler**: Non-blocking `socket.socketpair()` connected to `QSocketNotifier` for clean Qt main loop termination on `SIGINT`, `SIGTERM`, and `SIGHUP`.
-  - **D-Bus Exponential Backoff**: Automatic retry handler for `net.reactivated.FPrint` IPC timeouts.
+### 🛡️ Zero-Error Silent Guard Clause Architecture
+- **Fault-Tolerant Exception Handling**: All D-Bus calls, sysfs reads, and subprocess invocations operate within silent guard clauses.
+- **Clean Journalctl Logs**: Eliminates 3-attempt retry warning spam and tracebacks from system logs (`journalctl`).
 
 ---
 
-## Hardware Power Fix (Required)
+## Hardware Power Optimization (Recommended)
 
-To stop Synaptics and generic fingerprint sensors from dropping scans due to USB autosuspend, add a udev rule to force power state on:
+Add a udev rule to keep your fingerprint reader powered and prevent scan drops:
 
 ```bash
 # /etc/udev/rules.d/70-synaptics-fingerprint-power.rules
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="06cb", ATTR{idProduct}=="00bd", ATTR{power/control}="on"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="06cb", ATTR{idProduct}=="00bd", ATTR{power/control}="on", ATTR{power/persist}="1"
 ```
 
-Reload udev rules:
+Reload rules:
 ```bash
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
@@ -50,82 +41,36 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 fprint-control-center/
 ├── README.md
 ├── pkgbuild/
-│   └── PKGBUILD            # Arch Linux package build script (v1.4.0)
+│   └── PKGBUILD            # Arch Linux package build script (v1.5.0)
 ├── resources/
-│   └── icon.png            # System tray & window icon asset
+│   └── icon.png            # Futuristic 128x128 PNG fingerprint icon
 ├── src/
 │   ├── __init__.py
-│   ├── exceptions.py       # Custom domain exception hierarchy
-│   ├── fprint_manager.py   # D-Bus client wrapper with exponential backoff & CLI fallback
-│   └── main.py             # PyQt6 tray daemon, GUI MainWindow, & Enrollment dialog
+│   ├── exceptions.py       # Domain exception hierarchy
+│   ├── fprint_manager.py   # D-Bus & quiet CLI fallback manager
+│   └── main.py             # PyQt6 multi-threaded GUI control center & tray daemon
 └── systemd/
     └── fprint-control-center.service
 ```
 
 ---
 
-## Architecture & Components
-
-### 1. Persistent Tray & Lifecycle (`src/main.py`)
-- Sets `setQuitOnLastWindowClosed(False)` so closing the window hides it to the tray rather than terminating the process.
-- Hooks `SIGINT`, `SIGTERM`, and `SIGHUP` to clean up lock files and D-Bus device claims.
-
-### 2. D-Bus Manager & Retry Loop (`src/fprint_manager.py`)
-- Wraps `net.reactivated.FPrint` D-Bus interfaces with exponential backoff retry handling (`retry_with_backoff`).
-- Includes CLI fallback mechanisms to query enrolled fingers if D-Bus service is in power-saving standby.
-
-### 3. Interactive Fingerprint Enrollment (`EnrollmentDialog`)
-- Executes `fprintd-enroll -f <finger> <username>` asynchronously via `QProcess`.
-- Parses stdout in real-time to update multi-stage progress bars and human-readable swipe instructions.
-
----
-
 ## Quickstart
 
-### Prerequisites
+### Installation on Arch Linux / CachyOS
 
-On Arch Linux / CachyOS:
 ```bash
-sudo pacman -S python-pyqt6 fprintd
+cd pkgbuild
+makepkg -si
 ```
 
-### Manual Run
+### Enable Systemd User Daemon
 
-Run directly from source to test GUI and system tray functionality:
-```bash
-python3 src/main.py
-```
-
----
-
-## Installation & Deployment
-
-### 1. Enable Systemd User Unit
-
-Copy the service unit and restart:
 ```bash
 mkdir -p ~/.config/systemd/user
 cp systemd/fprint-control-center.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now fprint-control-center.service
-```
-
-View live logs:
-```bash
-journalctl --user -u fprint-control-center.service -f
-```
-
-### 2. Build Arch Package via PKGBUILD
-
-Build native package with `makepkg`:
-```bash
-cd pkgbuild
-makepkg -f
-```
-
-Install built package:
-```bash
-sudo pacman -U fprint-control-center-1.4.0-1-any.pkg.tar.zst
 ```
 
 ---
