@@ -1,6 +1,6 @@
-# fprint-control-center v1.5.0
+# fprint-control-center v1.6.0
 
-[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/areqpl/fprint-control-center)
+[![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)](https://github.com/areqpl/fprint-control-center)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41CD52.svg?logo=qt&logoColor=white)](https://www.qt.io/)
@@ -57,7 +57,7 @@ fprint-control-center/
 ├── llms.txt                            # AI summary index for LLMs
 ├── llms-full.txt                       # Comprehensive technical AI knowledge base
 ├── pkgbuild/
-│   └── PKGBUILD                        # Arch Linux package build script (v1.5.0)
+│   └── PKGBUILD                        # Arch Linux package build script (v1.6.0)
 ├── resources/
 │   └── icon.png                        # Futuristic 128x128 PNG fingerprint icon
 ├── src/
@@ -106,7 +106,7 @@ systemctl --user enable --now fprint-control-center.service
       "name": "fprint-control-center",
       "applicationCategory": "UtilitiesApplication",
       "operatingSystem": "Linux, Arch Linux, CachyOS",
-      "softwareVersion": "1.5.0",
+      "softwareVersion": "1.6.0",
       "license": "https://opensource.org/licenses/MIT",
       "description": "High-performance PyQt6 control center GUI & system tray daemon for fprintd fingerprint readers on Linux.",
       "url": "https://github.com/areqpl/fprint-control-center",
@@ -133,7 +133,7 @@ systemctl --user enable --now fprint-control-center.service
       "programmingLanguage": "Python",
       "runtimePlatform": "Python 3",
       "license": "https://opensource.org/licenses/MIT",
-      "version": "1.5.0"
+      "version": "1.6.0"
     }
   ]
 }

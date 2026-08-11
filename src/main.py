@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-fprint-control-center v1.5.0: PyQt6 Touchpad & Fingerprint Control Center.
+fprint-control-center v1.6.0: PyQt6 Touchpad & Fingerprint Control Center.
 Features:
+ - Proven Password Managers Integration (KeePassXC, 1Password, Bitwarden)
+ - Terminal Sudo & SUDO_ASKPASS Non-Blocking PAM Safeguards
  - High-Responsiveness USB Power Optimizations (power/control=on, power/persist=1)
  - Configurable Fingerprint Enrollment Position Stages (5 to 12 360° scan angles)
- - KeePassXC & Password Manager PAM Unlock Integration
- - Futuristic High-Resolution Fingerprint Tray Icon & Theme
- - Zero-Error Silent Guard Clause Exception Handling (general-best-practices)
+ - Zero-Error Silent Guard Clause Architecture
 """
 
 import sys
@@ -40,6 +40,7 @@ from exceptions import (
     EnrollmentError
 )
 from fprint_manager import FprintManager, retry_with_backoff
+from pam_bridge import check_pam_integrations, get_pam_guidance
 
 logging.basicConfig(
     level=logging.INFO,
@@ -343,27 +344,12 @@ class StatusQueryWorker(QObject):
             "dev_name": "Synaptics Prometheus MIS Touch (06cb:00bd)",
             "dev_path": "/net/reactivated/Fprint/Device/0",
             "usb_power_optimized": False,
-            "pam_sudo_active": False,
-            "keepassxc_active": False,
+            "pam_status": check_pam_integrations(),
             "enrolled_fingers": [],
         }
         try:
             rule_path = Path("/etc/udev/rules.d/70-synaptics-fingerprint-power.rules")
             result["usb_power_optimized"] = rule_path.is_file()
-
-            try:
-                pam_sudo = Path("/etc/pam.d/sudo")
-                if pam_sudo.is_file():
-                    result["pam_sudo_active"] = "pam_fprintd.so" in pam_sudo.read_text(errors="ignore")
-            except Exception:
-                pass
-
-            try:
-                keepass_pam = Path("/etc/pam.d/keepassxc")
-                if keepass_pam.is_file():
-                    result["keepassxc_active"] = "pam_fprintd.so" in keepass_pam.read_text(errors="ignore")
-            except Exception:
-                pass
 
             dev_info = self.fprint_mgr.get_default_device()
             result["dev_name"] = dev_info.get("name", "Synaptics Fingerprint Scanner")
@@ -427,6 +413,34 @@ class VerifyWorker(QObject):
 # ==============================================================================
 # UI COMPONENTS
 # ==============================================================================
+
+class PamGuideDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Password Managers & Terminal Integration Guide")
+        self.setFixedSize(540, 420)
+        self.setStyleSheet(PREMIUM_STYLE)
+
+        layout = QVBoxLayout()
+        layout.setSpacing(14)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        lbl_title = QLabel("🔐 Proven PAM & Password Manager Guide")
+        lbl_title.setObjectName("mainHeader")
+        layout.addWidget(lbl_title)
+
+        txt_info = QTextEdit()
+        txt_info.setReadOnly(True)
+        txt_info.setText(get_pam_guidance())
+        layout.addWidget(txt_info)
+
+        btn_close = QPushButton("Close")
+        btn_close.setObjectName("btnPrimary")
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignRight)
+
+        self.setLayout(layout)
+
 
 class EnrollmentDialog(QDialog):
     def __init__(self, parent=None, username: str = "", target_stages: int = 8):
@@ -573,7 +587,7 @@ class MainWindow(QMainWindow):
         self.verify_worker: Optional[VerifyWorker] = None
 
         self.setWindowTitle("Fingerprint Control Center")
-        self.setFixedSize(620, 580)
+        self.setFixedSize(640, 600)
         self.setStyleSheet(PREMIUM_STYLE)
 
         icon = get_app_icon()
@@ -672,7 +686,7 @@ class MainWindow(QMainWindow):
         ov_layout.addWidget(card_enrolled)
         self.tabs.addTab(tab_overview, "🖐️ Overview & Templates")
 
-        # TAB 2: RESPONSIVENESS & PAM / KEEPASSXC SETTINGS
+        # TAB 2: RESPONSIVENESS & PASSWORD MANAGERS INTEGRATION
         tab_settings = QWidget()
         set_layout = QVBoxLayout(tab_settings)
         set_layout.setSpacing(14)
@@ -704,13 +718,13 @@ class MainWindow(QMainWindow):
 
         set_layout.addWidget(card_resp)
 
-        # CARD 4: PAM & KeePassXC Integration
+        # CARD 4: Password Managers & Terminal PAM Integration
         card_pam = QFrame()
         card_pam.setObjectName("cardFrame")
         pam_layout = QVBoxLayout(card_pam)
         pam_layout.setSpacing(8)
 
-        lbl_pam_title = QLabel("🔐 PAM & KEEPASSXC PASSWORD MANAGER INTEGRATION")
+        lbl_pam_title = QLabel("🔐 PASSWORD MANAGERS & TERMINAL PAM STATUS")
         lbl_pam_title.setObjectName("cardTitle")
         pam_layout.addWidget(lbl_pam_title)
 
@@ -721,6 +735,10 @@ class MainWindow(QMainWindow):
         self.lbl_keepass = QLabel("KeePassXC PAM Integration: Ready for fprintd unlock")
         self.lbl_keepass.setStyleSheet("color: #73daca;")
         pam_layout.addWidget(self.lbl_keepass)
+
+        btn_pam_guide = QPushButton("📖 View Password Manager & Terminal Setup Guide")
+        btn_pam_guide.clicked.connect(self.show_pam_guide)
+        pam_layout.addWidget(btn_pam_guide, alignment=Qt.AlignmentFlag.AlignLeft)
 
         set_layout.addWidget(card_pam)
 
@@ -764,6 +782,10 @@ class MainWindow(QMainWindow):
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
 
+    def show_pam_guide(self):
+        dialog = PamGuideDialog(self)
+        dialog.exec()
+
     # --------------------------------------------------------------------------
     # ASYNCHRONOUS WORKER SLOTS
     # --------------------------------------------------------------------------
@@ -797,12 +819,20 @@ class MainWindow(QMainWindow):
             self.lbl_usb_power.setObjectName("badgeWarning")
         self.lbl_usb_power.setStyleSheet("")
 
-        if data.get("pam_sudo_active"):
+        pam_status = data.get("pam_status", {})
+        if pam_status.get("sudo_pam"):
             self.lbl_pam_sudo.setText("Sudo PAM (/etc/pam.d/sudo): 🔵 Active (pam_fprintd.so configured)")
             self.lbl_pam_sudo.setStyleSheet("color: #73daca; font-weight: bold;")
         else:
             self.lbl_pam_sudo.setText("Sudo PAM (/etc/pam.d/sudo): ⚠️ Inactive")
             self.lbl_pam_sudo.setStyleSheet("color: #e0af68;")
+
+        if pam_status.get("keepassxc_pam"):
+            self.lbl_keepass.setText("KeePassXC PAM (/etc/pam.d/keepassxc): 🔵 Active (Biometric unlock enabled)")
+            self.lbl_keepass.setStyleSheet("color: #73daca; font-weight: bold;")
+        else:
+            self.lbl_keepass.setText("KeePassXC PAM Integration: Ready for fprintd unlock")
+            self.lbl_keepass.setStyleSheet("color: #a9b1d6;")
 
         self.lbl_dev_name.setText(f"Device: {data.get('dev_name')}")
         self.lbl_dev_path.setText(f"D-Bus Path: {data.get('dev_path')}")
