@@ -1,6 +1,20 @@
 # fprint-control-center v1.5.0
 
+[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/areqpl/fprint-control-center)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41CD52.svg?logo=qt&logoColor=white)](https://www.qt.io/)
+[![Platform](https://img.shields.io/badge/Platform-Arch%20Linux%20%7C%20CachyOS-1793D1.svg?logo=arch-linux&logoColor=white)](https://archlinux.org)
+[![Service](https://img.shields.io/badge/Service-fprintd%20D--Bus-red.svg)](https://fprint.freedesktop.org/)
+
 A high-performance background system tray daemon and GUI control center for `fprintd` fingerprint devices on Arch Linux, CachyOS, and Linux laptops with touchpad fingerprint scanners (Synaptics, Validity, Elan).
+
+## 🤖 AI & Generative Search Indexing
+This repository supports Generative Engine Optimization (GEO) for AI models and LLM indexers:
+- **LLM Summary Index**: [llms.txt](llms.txt)
+- **Full Architecture Knowledge Base**: [llms-full.txt](llms-full.txt)
+
+---
 
 ## Key Features & Responsiveness Optimizations
 
@@ -39,16 +53,18 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 ```
 fprint-control-center/
-├── README.md
+├── README.md                           # Documentation & structured JSON-LD schema
+├── llms.txt                            # AI summary index for LLMs
+├── llms-full.txt                       # Comprehensive technical AI knowledge base
 ├── pkgbuild/
-│   └── PKGBUILD            # Arch Linux package build script (v1.5.0)
+│   └── PKGBUILD                        # Arch Linux package build script (v1.5.0)
 ├── resources/
-│   └── icon.png            # Futuristic 128x128 PNG fingerprint icon
+│   └── icon.png                        # Futuristic 128x128 PNG fingerprint icon
 ├── src/
 │   ├── __init__.py
-│   ├── exceptions.py       # Domain exception hierarchy
-│   ├── fprint_manager.py   # D-Bus & quiet CLI fallback manager
-│   └── main.py             # PyQt6 multi-threaded GUI control center & tray daemon
+│   ├── exceptions.py                   # Domain exception hierarchy
+│   ├── fprint_manager.py               # D-Bus & quiet CLI fallback manager
+│   └── main.py                         # PyQt6 multi-threaded GUI control center & tray daemon
 └── systemd/
     └── fprint-control-center.service
 ```
@@ -78,3 +94,46 @@ systemctl --user enable --now fprint-control-center.service
 ## License
 
 MIT License. See file header for details.
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://github.com/areqpl/fprint-control-center#application",
+      "name": "fprint-control-center",
+      "applicationCategory": "UtilitiesApplication",
+      "operatingSystem": "Linux, Arch Linux, CachyOS",
+      "softwareVersion": "1.5.0",
+      "license": "https://opensource.org/licenses/MIT",
+      "description": "High-performance PyQt6 control center GUI & system tray daemon for fprintd fingerprint readers on Linux.",
+      "url": "https://github.com/areqpl/fprint-control-center",
+      "author": {
+        "@type": "Person",
+        "name": "areqpl",
+        "url": "https://github.com/areqpl"
+      },
+      "requirements": "Python 3.10+, PyQt6, fprintd, systemd",
+      "featureList": [
+        "USB autosuspend power optimization (power/control=on, power/persist=1)",
+        "Configurable 360-degree 5-to-12 stage fingerprint enrollment",
+        "Interactive verification match tester GUI",
+        "KeePassXC and PAM sudo biometric unlock integration",
+        "Zero-error silent D-Bus guard clause architecture",
+        "Systemd user daemon and system tray icon integration"
+      ]
+    },
+    {
+      "@type": "SoftwareSourceCode",
+      "@id": "https://github.com/areqpl/fprint-control-center#source",
+      "name": "fprint-control-center Source Repository",
+      "codeRepository": "https://github.com/areqpl/fprint-control-center",
+      "programmingLanguage": "Python",
+      "runtimePlatform": "Python 3",
+      "license": "https://opensource.org/licenses/MIT",
+      "version": "1.5.0"
+    }
+  ]
+}
+</script>
