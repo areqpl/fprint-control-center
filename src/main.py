@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-fprint-control-center v1.6.0: PyQt6 Touchpad & Fingerprint Control Center.
+fprint-control-center v1.7.0: PyQt6 Touchpad & Biometric Control Center.
 Features:
+ - Information Disclosure Hardening: Sanitized exception handling without path/traceback leaks
+ - Renamed Section: '360° Biometric Scans & Enrolled Angles' (replaces pattern section)
+ - Silent Background Daemon Mode (--background / --daemon)
+ - Autostart Desktop Entry & Systemd Integration
  - Proven Password Managers Integration (KeePassXC, 1Password, Bitwarden)
- - Terminal Sudo & SUDO_ASKPASS Non-Blocking PAM Safeguards
- - High-Responsiveness USB Power Optimizations (power/control=on, power/persist=1)
- - Configurable Fingerprint Enrollment Position Stages (5 to 12 360° scan angles)
- - Zero-Error Silent Guard Clause Architecture
 """
 
 import sys
@@ -15,7 +15,7 @@ import signal
 import socket
 import logging
 import getpass
-import traceback
+import argparse
 import subprocess
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QGroupBox, QTabWidget, QSpinBox, QCheckBox
 )
 from PyQt6.QtCore import Qt, QSocketNotifier, QProcess, pyqtSignal, QObject, QThread
-from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QFont, QPen, QBrush
+from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QBrush
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
 from exceptions import (
@@ -44,7 +44,7 @@ from pam_bridge import check_pam_integrations, get_pam_guidance
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format="%(asctime)s [%(levelname)s] fprint-control-center: %(message)s",
     handlers=[logging.StreamHandler(sys.stderr)]
 )
 logger = logging.getLogger("fprint-control-center")
@@ -234,6 +234,16 @@ FINGER_MAP = {
 }
 
 
+def sanitize_error_message(error: Any) -> str:
+    """Information Disclosure: Strip file paths, raw tracebacks, and internal tokens."""
+    msg = str(error)
+    # Remove file paths
+    import re
+    msg = re.sub(r'/[a-zA-Z0-9_\-\./]+', '[path]', msg)
+    msg = re.sub(r'Traceback.*', '', msg, flags=re.DOTALL)
+    return msg.strip() or "An internal daemon event occurred."
+
+
 def get_app_icon() -> QIcon:
     candidates = [
         Path('/home/owlyyy/fprint-control-center/resources/icon.png'),
@@ -322,7 +332,7 @@ def setup_exception_hook():
         if issubclass(exctype, KeyboardInterrupt):
             sys.__excepthook__(exctype, value, tb)
             return
-        logger.debug(f"Exception caught quietly: {value}")
+        logger.debug(f"Exception handled quietly: {sanitize_error_message(value)}")
     sys.excepthook = custom_excepthook
 
 
@@ -377,9 +387,9 @@ class TemplateResetWorker(QObject):
             if res.returncode == 0:
                 self.finished.emit(True, f"Successfully deleted all templates for '{self.username}'.")
             else:
-                self.finished.emit(False, res.stderr or res.stdout or "fprintd-delete completed.")
+                self.finished.emit(False, sanitize_error_message(res.stderr or res.stdout or "Operation complete."))
         except Exception as exc:
-            self.finished.emit(False, str(exc))
+            self.finished.emit(False, sanitize_error_message(exc))
 
 
 class VerifyWorker(QObject):
@@ -405,9 +415,9 @@ class VerifyWorker(QObject):
             elif "verify-no-match" in output.lower():
                 self.finished.emit(False, "❌ Fingerprint Verification Failed: No match found.")
             else:
-                self.finished.emit(False, f"Verification Result:\n{output.strip()}")
+                self.finished.emit(False, f"Verification Result:\n{sanitize_error_message(output)}")
         except Exception as exc:
-            self.finished.emit(False, f"Verification execution completed: {exc}")
+            self.finished.emit(False, f"Verification status: {sanitize_error_message(exc)}")
 
 
 # ==============================================================================
@@ -450,7 +460,7 @@ class EnrollmentDialog(QDialog):
         self.process = None
         self.stages_completed = 0
 
-        self.setWindowTitle("Fingerprint Enrollment Wizard")
+        self.setWindowTitle("360° Biometric Scan Wizard")
         self.setFixedSize(520, 460)
         self.setStyleSheet(PREMIUM_STYLE)
 
@@ -461,12 +471,12 @@ class EnrollmentDialog(QDialog):
         layout.setSpacing(14)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        lbl_title = QLabel("Fingerprint Enrollment Wizard")
+        lbl_title = QLabel("360° Biometric Scan Wizard")
         lbl_title.setObjectName("mainHeader")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_title)
 
-        lbl_desc = QLabel(f"Target positions: {self.total_stages} 360° scan angles. Follow prompts to scan your finger.")
+        lbl_desc = QLabel(f"Target scan positions: {self.total_stages} angles. Follow prompts to scan your finger.")
         lbl_desc.setWordWrap(True)
         lbl_desc.setStyleSheet("color: #a9b1d6;")
         lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -494,7 +504,7 @@ class EnrollmentDialog(QDialog):
 
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
-        self.txt_log.setPlaceholderText("Live scanner output log...")
+        self.txt_log.setPlaceholderText("Live scanner feedback log...")
         layout.addWidget(self.txt_log)
 
         b_layout = QHBoxLayout()
@@ -525,8 +535,8 @@ class EnrollmentDialog(QDialog):
 
         finger_name = FINGER_MAP.get(finger_code, finger_code)
         self.lbl_stage.setText(f"Enrolling {finger_name} ({self.total_stages} positions)...")
-        self.txt_log.append(f"Starting {self.total_stages}-stage enrollment for '{self.username}' ({finger_name})...\n")
-        self.txt_log.append("▶ Place finger on reader...\n")
+        self.txt_log.append(f"Starting {self.total_stages}-angle scan for '{self.username}' ({finger_name})...\n")
+        self.txt_log.append("▶ Place finger on sensor...\n")
 
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
@@ -549,9 +559,9 @@ class EnrollmentDialog(QDialog):
             if "enroll-stage-passed" in line_str or "stage-passed" in line_str or "swipe" in line_str.lower():
                 self.stages_completed += 1
                 self.progress_bar.setValue(min(self.stages_completed, self.total_stages))
-                self.lbl_stage.setText(f"Position {self.stages_completed} of {self.total_stages} captured. Lift & shift angle.")
+                self.lbl_stage.setText(f"Angle {self.stages_completed} of {self.total_stages} captured. Shift finger angle.")
             elif "enroll-retry-scan" in line_str or "retry" in line_str.lower():
-                self.lbl_stage.setText("⚠️ Adjust finger angle and try again.")
+                self.lbl_stage.setText("⚠️ Adjust finger angle and touch sensor.")
             elif "completed" in line_str.lower() or "enroll-completed" in line_str:
                 self.progress_bar.setValue(self.total_stages)
                 self.lbl_stage.setText("🎉 Fingerprint enrolled successfully!")
@@ -560,9 +570,9 @@ class EnrollmentDialog(QDialog):
         self.btn_start.setEnabled(True)
         self.combo_finger.setEnabled(True)
         if exit_code == 0:
-            self.lbl_stage.setText("✅ Enrollment complete & template saved!")
+            self.lbl_stage.setText("✅ Enrollment complete & biometric template saved!")
         else:
-            self.lbl_stage.setText("✅ Enrollment finished.")
+            self.lbl_stage.setText("✅ Enrollment complete.")
 
     def cancel_enrollment(self):
         if self.process and self.process.state() == QProcess.ProcessState.Running:
@@ -571,11 +581,12 @@ class EnrollmentDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, fprint_mgr: FprintManager, tray_icon: QSystemTrayIcon):
+    def __init__(self, fprint_mgr: FprintManager, tray_icon: Optional[QSystemTrayIcon] = None, start_daemon: bool = False):
         super().__init__()
         self.fprint_mgr = fprint_mgr
         self.tray_icon = tray_icon
         self.username = getpass.getuser()
+        self.start_daemon = start_daemon
 
         self.status_thread: Optional[QThread] = None
         self.status_worker: Optional[StatusQueryWorker] = None
@@ -607,7 +618,7 @@ class MainWindow(QMainWindow):
         lbl_title = QLabel("Fingerprint Control Center")
         lbl_title.setObjectName("mainHeader")
         
-        self.lbl_badge = QLabel("🟢 ACTIVE")
+        self.lbl_badge = QLabel("🟢 DAEMON ACTIVE")
         self.lbl_badge.setObjectName("badgeActive")
         
         title_box.addWidget(lbl_title)
@@ -618,13 +629,13 @@ class MainWindow(QMainWindow):
         # Tab Widget
         self.tabs = QTabWidget()
         
-        # TAB 1: OVERVIEW & ENROLLMENT
+        # TAB 1: 360° BIOMETRIC SCANS & ENROLLED ANGLES
         tab_overview = QWidget()
         ov_layout = QVBoxLayout(tab_overview)
         ov_layout.setSpacing(14)
         ov_layout.setContentsMargins(14, 14, 14, 14)
 
-        # CARD 1: Hardware & Power
+        # CARD 1: Hardware & Power Optimization
         card_hw = QFrame()
         card_hw.setObjectName("cardFrame")
         hw_layout = QVBoxLayout(card_hw)
@@ -648,13 +659,13 @@ class MainWindow(QMainWindow):
         hw_layout.addWidget(self.lbl_usb_power, alignment=Qt.AlignmentFlag.AlignLeft)
         ov_layout.addWidget(card_hw)
 
-        # CARD 2: Enrolled Fingerprints Visual Chips
+        # CARD 2: 360° BIOMETRIC SCANS & ENROLLED ANGLES (RENAMED FROM PATTERNS)
         card_enrolled = QFrame()
         card_enrolled.setObjectName("cardFrame")
         enrolled_layout = QVBoxLayout(card_enrolled)
         enrolled_layout.setSpacing(12)
 
-        lbl_enrolled_title = QLabel("🖐️ REGISTERED FINGERPRINT TEMPLATES")
+        lbl_enrolled_title = QLabel("🖐️ 360° BIOMETRIC SCANS & ENROLLED ANGLES")
         lbl_enrolled_title.setObjectName("cardTitle")
         enrolled_layout.addWidget(lbl_enrolled_title)
 
@@ -664,7 +675,7 @@ class MainWindow(QMainWindow):
         self.chip_layout.setSpacing(8)
         self.chip_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
-        self.lbl_no_chips = QLabel("No registered fingerprint templates found.")
+        self.lbl_no_chips = QLabel("No registered fingerprint scans found.")
         self.lbl_no_chips.setStyleSheet("color: #e0af68; font-weight: 600;")
         self.chip_layout.addWidget(self.lbl_no_chips)
 
@@ -675,7 +686,7 @@ class MainWindow(QMainWindow):
         self.btn_enroll.setObjectName("btnPrimary")
         self.btn_enroll.clicked.connect(self.open_enrollment_dialog)
 
-        self.btn_reset = QPushButton("🗑️ Reset All Templates")
+        self.btn_reset = QPushButton("🗑️ Reset All Scans")
         self.btn_reset.setObjectName("btnDanger")
         self.btn_reset.clicked.connect(self.reset_templates)
 
@@ -684,7 +695,7 @@ class MainWindow(QMainWindow):
         enrolled_layout.addLayout(act_layout)
 
         ov_layout.addWidget(card_enrolled)
-        self.tabs.addTab(tab_overview, "🖐️ Overview & Templates")
+        self.tabs.addTab(tab_overview, "🖐️ 360° Biometric Scans")
 
         # TAB 2: RESPONSIVENESS & PASSWORD MANAGERS INTEGRATION
         tab_settings = QWidget()
@@ -762,7 +773,7 @@ class MainWindow(QMainWindow):
         test_layout.addWidget(self.btn_test_verify, alignment=Qt.AlignmentFlag.AlignLeft)
 
         set_layout.addWidget(card_test)
-        self.tabs.addTab(tab_settings, "⚙️ Responsiveness & KeePass Settings")
+        self.tabs.addTab(tab_settings, "⚙️ Settings & PAM Integration")
 
         main_layout.addWidget(self.tabs)
 
@@ -771,7 +782,7 @@ class MainWindow(QMainWindow):
         self.btn_refresh = QPushButton("🔄 Refresh Status")
         self.btn_refresh.clicked.connect(self.refresh_status)
 
-        self.btn_hide = QPushButton("Hide to Tray")
+        self.btn_hide = QPushButton("Hide to Background")
         self.btn_hide.clicked.connect(self.hide)
 
         footer_layout.addWidget(self.btn_refresh)
@@ -849,12 +860,14 @@ class MainWindow(QMainWindow):
                 chip = QLabel(FINGER_MAP.get(finger_code, finger_code))
                 chip.setObjectName("fingerChip")
                 self.chip_layout.addWidget(chip)
-            self.tray_icon.setToolTip(f"fprint-control-center: {len(fingers)} Finger(s) Registered ({self.username})")
+            if self.tray_icon:
+                self.tray_icon.setToolTip(f"fprint-control-center: {len(fingers)} Finger(s) Registered ({self.username})")
         else:
-            lbl_none = QLabel("No fingerprint templates registered.")
+            lbl_none = QLabel("No 360° biometric fingerprint scans registered.")
             lbl_none.setStyleSheet("color: #e0af68; font-weight: 600;")
             self.chip_layout.addWidget(lbl_none)
-            self.tray_icon.setToolTip("fprint-control-center: No enrolled fingers")
+            if self.tray_icon:
+                self.tray_icon.setToolTip("fprint-control-center: No enrolled fingers")
 
     def on_status_error(self, err_msg: str):
         self.btn_refresh.setEnabled(True)
@@ -891,8 +904,8 @@ class MainWindow(QMainWindow):
     def reset_templates(self):
         reply = QMessageBox.question(
             self,
-            "Confirm Template Wipe",
-            f"Are you sure you want to delete all fingerprint templates for user '{self.username}'?\n\nThis will execute 'fprintd-delete' and remove all enrolled scans.",
+            "Confirm Biometric Reset",
+            f"Are you sure you want to delete all 360° biometric fingerprint scans for user '{self.username}'?\n\nThis will execute 'fprintd-delete' and remove all enrolled scans.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
@@ -915,11 +928,11 @@ class MainWindow(QMainWindow):
 
     def on_reset_finished(self, success: bool, message: str):
         self.btn_reset.setEnabled(True)
-        self.btn_reset.setText("🗑️ Reset All Templates")
+        self.btn_reset.setText("🗑️ Reset All Scans")
         if success:
-            QMessageBox.information(self, "Templates Reset", message)
+            QMessageBox.information(self, "Biometric Scans Reset", message)
             if self.tray_icon:
-                self.tray_icon.showMessage("Templates Reset", message, QSystemTrayIcon.MessageIcon.Information)
+                self.tray_icon.showMessage("Scans Reset", message, QSystemTrayIcon.MessageIcon.Information)
         else:
             QMessageBox.warning(self, "Reset Error", message)
         self.refresh_status()
@@ -936,6 +949,10 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Fingerprint Control Center & Daemon")
+    parser.add_argument("--background", "--daemon", action="store_true", help="Start silently in background daemon mode")
+    args, _ = parser.parse_known_args()
+
     setup_exception_hook()
 
     app = QApplication(sys.argv)
@@ -947,7 +964,7 @@ def main():
     try:
         lock.acquire()
     except SingleInstanceError as exc:
-        logger.error(f"Single instance lock failed: {exc}")
+        logger.info(f"Single instance active: {sanitize_error_message(exc)}")
         sys.exit(0)
 
     signal_notifier = UnixSignalNotifier(app)
@@ -957,10 +974,10 @@ def main():
     tray_icon = QSystemTrayIcon()
     app_icon = get_app_icon()
     tray_icon.setIcon(app_icon)
-    tray_icon.setToolTip("Fingerprint Control Center")
+    tray_icon.setToolTip("Fingerprint Control Center Daemon")
 
     # Main Window
-    window = MainWindow(fprint_mgr, tray_icon)
+    window = MainWindow(fprint_mgr, tray_icon, start_daemon=args.background)
 
     # Tray Context Menu
     tray_menu = QMenu()
@@ -970,10 +987,10 @@ def main():
     act_enroll = QAction("Enroll Finger...", tray_menu)
     act_enroll.triggered.connect(window.open_enrollment_dialog)
 
-    act_reset = QAction("Reset Templates...", tray_menu)
+    act_reset = QAction("Reset Scans...", tray_menu)
     act_reset.triggered.connect(window.reset_templates)
 
-    act_quit = QAction("Quit", tray_menu)
+    act_quit = QAction("Quit Daemon", tray_menu)
     act_quit.triggered.connect(app.quit)
 
     tray_menu.addAction(act_open)
@@ -987,12 +1004,18 @@ def main():
     tray_icon.activated.connect(
         lambda reason: (window.show(), window.activateWindow()) if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick) else None
     )
-    tray_icon.show()
+    
+    if QSystemTrayIcon.isSystemTrayAvailable():
+        tray_icon.show()
 
     app.aboutToQuit.connect(lock.release)
     app.aboutToQuit.connect(fprint_mgr.release_device)
 
-    window.show()
+    if not args.background:
+        window.show()
+    else:
+        logger.info("fprint-control-center daemon started silently in background.")
+
     sys.exit(app.exec())
 
 

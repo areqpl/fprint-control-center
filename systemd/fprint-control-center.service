@@ -1,19 +1,17 @@
 [Unit]
-Description=Fingerprint Control Center Service
-After=graphical-session.target
-StartLimitIntervalSec=60s
-StartLimitBurst=5
+Description=Fingerprint Control Center Background Daemon
+Documentation=https://github.com/areqpl/fprint-control-center
+After=graphical-session.target fprintd.service
+Wants=fprintd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /home/owlyyy/fprint-control-center/src/main.py
+ExecStart=/usr/bin/python3 /home/owlyyy/fprint-control-center/src/main.py --background
 Restart=on-failure
-RestartSec=3s
+RestartSec=5s
 Environment=PYTHONUNBUFFERED=1
 Environment=DISPLAY=:0
 Environment=QT_QPA_PLATFORM=xcb;wayland
-ProtectSystem=full
-PrivateTmp=true
 
 [Install]
 WantedBy=default.target
