@@ -1,0 +1,11 @@
+[Unit]
+Description=Fingerprint Control Center Service
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/fprint-control-center/src/main.py
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
