@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel
 from PyQt6.QtCore import Qt
@@ -9,7 +10,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle('Fingerprint Control Center')
         # Set window icon if exists
-        icon_path = Path(__file__).resolve().parent.parent / 'resources' / 'icon.png'
+        icon_path = Path('/usr/share/pixmaps/fprint-control-center.png')
+        if not icon_path.is_file():
+            icon_path = Path(__file__).resolve().parent.parent / 'resources' / 'icon.png'
         if icon_path.is_file():
             self.setWindowIcon(QIcon(str(icon_path)))
         label = QLabel('Fingerprint Control Center UI')

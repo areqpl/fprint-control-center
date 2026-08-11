@@ -4,7 +4,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/fprint-control-center/src/main.py
+ExecStart=/usr/bin/fprint-control-center
 Restart=on-failure
 
 [Install]
