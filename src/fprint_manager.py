@@ -292,6 +292,25 @@ class FprintManager:
         finally:
             self._claimed = False
 
+    def _list_enrolled_fingers_cli(self, username: str = "") -> List[str]:
+        import subprocess
+        try:
+            cmd = ["fprintd-list"]
+            if username:
+                cmd.append(username)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            fingers = []
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("- #") and ":" in line:
+                    finger = line.split(":", 1)[1].strip()
+                    if finger:
+                        fingers.append(finger)
+            return fingers
+        except Exception as exc:
+            logger.warning(f"fprintd-list CLI fallback failed: {exc}")
+            return []
+
     @retry_with_backoff(max_retries=2, initial_delay=0.5)
     def list_enrolled_fingers(self, username: str = "") -> List[str]:
         """
@@ -301,7 +320,13 @@ class FprintManager:
             self.recover_usb_state()
 
         if not self._current_device_path:
-            raise DeviceNotFoundError("No active device to query enrolled fingers.")
+            try:
+                self.get_default_device()
+            except Exception:
+                pass
+
+        if not self._current_device_path:
+            return self._list_enrolled_fingers_cli(username)
 
         try:
             if self._bus_type == "dbus":
@@ -321,9 +346,10 @@ class FprintManager:
                 reply = dev_iface.call("ListEnrolledFingers", username)
                 if reply.isValid() and reply.arguments():
                     return [str(f) for f in reply.arguments()[0]]
-                return []
+                return self._list_enrolled_fingers_cli(username)
         except Exception as exc:
             if "NoEnrolledFingers" in str(exc):
                 return []
-            raise DBusCommunicationError("Failed to list enrolled fingers.", original_exception=exc)
+            logger.warning(f"D-Bus list_enrolled_fingers failed ({exc}), attempting CLI fallback...")
+            return self._list_enrolled_fingers_cli(username)
         return []
