@@ -91,11 +91,12 @@ systemctl --user enable --now fprint-control-center.service
 
 ---
 
-## License
+## Metadata & Structured Data
 
-MIT License. See file header for details.
+<details>
+<summary><b>🔍 Click to view JSON-LD Schema.org Metadata</b></summary>
 
-<script type="application/ld+json">
+```json
 {
   "@context": "https://schema.org",
   "@graph": [
@@ -136,4 +137,12 @@ MIT License. See file header for details.
     }
   ]
 }
-</script>
+```
+
+</details>
+
+---
+
+## License
+
+MIT License. See file header for details.
