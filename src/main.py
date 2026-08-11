@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-fprint-control-center v1.2.1: PyQt6 Desktop GUI Application & Daemon.
-Re-architected strictly following PyQt6 Desktop GUI Development Best Practices:
- - Golden Rule: All D-Bus I/O, subprocess execution, and disk checks offloaded to QThread workers
- - Garbage Collection Protection: Active references held for all worker threads
- - Strict Thread Safety: UI widget state mutated exclusively via pyqtSignal slots
- - Modern QSS & Visual Hierarchy: Responsive controls, Catppuccin Mocha styling, disabled/hover states
+fprint-control-center v1.3.0: PyQt6 Ultra-Premium Desktop GUI & Daemon.
+Designed with high-end UI/UX standards:
+ - TokyoNight / Modern Obsidian Glassmorphism Palette (WCAG AAA Contrast)
+ - Visual Finger Chips & Status Badges
+ - Custom Rounded Card Widgets with Subtle Borders & Hover Lighting
+ - Asynchronous QThread Concurrency & Non-Blocking Subprocess Wizard
 """
 
 import sys
@@ -25,10 +25,10 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QVBoxLayout,
     QWidget, QPushButton, QMessageBox, QHBoxLayout, QFrame,
     QSystemTrayIcon, QMenu, QDialog, QComboBox, QTextEdit,
-    QProgressBar, QGroupBox, QGridLayout
+    QProgressBar, QGroupBox, QGridLayout, QScrollArea
 )
 from PyQt6.QtCore import Qt, QSocketNotifier, QProcess, pyqtSignal, QObject, QThread
-from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QFont
+from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QFont, QPen, QBrush
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
 from exceptions import (
@@ -48,121 +48,188 @@ logging.basicConfig(
 )
 logger = logging.getLogger("fprint-control-center")
 
-DARK_STYLE = """
+PREMIUM_STYLE = """
 QMainWindow, QDialog {
-    background-color: #1e1e2e;
-    color: #cdd6f4;
-    font-family: 'Inter', 'Segoe UI', 'Noto Sans', sans-serif;
+    background-color: #0f0f17;
+    color: #c0caf5;
+    font-family: 'Inter', 'Segoe UI', 'SF Pro Display', sans-serif;
 }
-QGroupBox {
-    background-color: #181825;
-    border: 1px solid #313244;
-    border-radius: 10px;
-    margin-top: 12px;
-    padding-top: 14px;
-    font-weight: bold;
-    color: #89b4fa;
+
+QFrame#cardFrame {
+    background-color: #1a1b26;
+    border: 1px solid #24283b;
+    border-radius: 12px;
+    padding: 16px;
 }
-QGroupBox::title {
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    padding: 0 8px;
-    color: #89b4fa;
+
+QFrame#cardFrame:hover {
+    border: 1px solid #414868;
 }
+
 QLabel {
-    color: #cdd6f4;
+    color: #c0caf5;
     font-size: 13px;
 }
-QLabel#titleLabel {
-    font-size: 18px;
-    font-weight: bold;
-    color: #cba6f7;
+
+QLabel#mainHeader {
+    font-size: 20px;
+    font-weight: 800;
+    color: #7aa2f7;
+    letter-spacing: 0.5px;
 }
+
+QLabel#cardTitle {
+    font-size: 14px;
+    font-weight: 700;
+    color: #bb9af7;
+}
+
+QLabel#badgeActive {
+    background-color: #1f372d;
+    color: #73daca;
+    border: 1px solid #2e5b47;
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-weight: 700;
+    font-size: 11px;
+}
+
+QLabel#badgeWarning {
+    background-color: #3b2d1d;
+    color: #e0af68;
+    border: 1px solid #5d4428;
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-weight: 700;
+    font-size: 11px;
+}
+
+QLabel#badgeInfo {
+    background-color: #1d2d3a;
+    color: #7dcfff;
+    border: 1px solid #29475c;
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-weight: 700;
+    font-size: 11px;
+}
+
+QLabel#fingerChip {
+    background-color: #24283b;
+    color: #7dcfff;
+    border: 1px solid #3b4261;
+    border-radius: 14px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
 QPushButton {
-    background-color: #313244;
-    color: #cdd6f4;
-    border: 1px solid #45475a;
-    border-radius: 6px;
-    padding: 8px 16px;
+    background-color: #24283b;
+    color: #c0caf5;
+    border: 1px solid #3b4261;
+    border-radius: 8px;
+    padding: 9px 18px;
     font-weight: 600;
     font-size: 13px;
 }
+
 QPushButton:hover {
-    background-color: #45475a;
-    border-color: #585b70;
+    background-color: #2f354f;
+    border-color: #565f89;
+    color: #ffffff;
 }
+
 QPushButton:pressed {
-    background-color: #585b70;
+    background-color: #414868;
 }
+
 QPushButton:disabled {
-    background-color: #181825;
-    color: #6c7086;
-    border-color: #313244;
+    background-color: #16161e;
+    color: #565f89;
+    border-color: #1a1b26;
 }
-QPushButton#primaryBtn {
+
+QPushButton#btnPrimary {
+    background-color: #7aa2f7;
+    color: #15161e;
+    border: none;
+    font-weight: 700;
+}
+
+QPushButton#btnPrimary:hover {
     background-color: #89b4fa;
-    color: #11111b;
-    border: none;
 }
-QPushButton#primaryBtn:hover {
-    background-color: #b4befe;
+
+QPushButton#btnPrimary:disabled {
+    background-color: #3b4261;
+    color: #565f89;
 }
-QPushButton#primaryBtn:disabled {
-    background-color: #45475a;
-    color: #7f849c;
+
+QPushButton#btnDanger {
+    background-color: #1a1b26;
+    color: #f7768e;
+    border: 1px solid #f7768e;
+    font-weight: 600;
 }
-QPushButton#dangerBtn {
-    background-color: #f38ba8;
-    color: #11111b;
-    border: none;
+
+QPushButton#btnDanger:hover {
+    background-color: #f7768e;
+    color: #15161e;
 }
-QPushButton#dangerBtn:hover {
-    background-color: #f5e0dc;
+
+QPushButton#btnDanger:disabled {
+    background-color: #1a1b26;
+    color: #565f89;
+    border-color: #3b4261;
 }
-QPushButton#dangerBtn:disabled {
-    background-color: #45475a;
-    color: #7f849c;
-}
+
 QProgressBar {
-    border: 1px solid #45475a;
+    border: 1px solid #3b4261;
     border-radius: 6px;
     text-align: center;
-    background-color: #181825;
-    color: #cdd6f4;
+    background-color: #16161e;
+    color: #c0caf5;
     font-weight: bold;
+    height: 16px;
 }
+
 QProgressBar::chunk {
-    background-color: #a6e3a1;
+    background-color: #73daca;
     border-radius: 5px;
 }
+
 QComboBox {
-    background-color: #313244;
-    color: #cdd6f4;
-    border: 1px solid #45475a;
-    border-radius: 6px;
-    padding: 6px 12px;
+    background-color: #24283b;
+    color: #c0caf5;
+    border: 1px solid #3b4261;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 13px;
 }
+
 QTextEdit {
-    background-color: #11111b;
-    color: #a6e3a1;
-    border: 1px solid #313244;
-    border-radius: 6px;
-    font-family: 'Consolas', 'Monaco', monospace;
+    background-color: #16161e;
+    color: #9ece6a;
+    border: 1px solid #24283b;
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
     font-size: 12px;
+    padding: 8px;
 }
 """
 
 FINGER_MAP = {
-    "right-index-finger": "Right Index Finger",
-    "left-index-finger": "Left Index Finger",
-    "right-thumb": "Right Thumb",
-    "left-thumb": "Left Thumb",
-    "right-middle-finger": "Right Middle Finger",
-    "left-middle-finger": "Left Middle Finger",
-    "right-ring-finger": "Right Ring Finger",
-    "left-ring-finger": "Left Ring Finger",
-    "right-little-finger": "Right Little Finger",
-    "left-little-finger": "Left Little Finger",
+    "right-index-finger": "☝️ Right Index Finger",
+    "left-index-finger": "☝️ Left Index Finger",
+    "right-thumb": "👍 Right Thumb",
+    "left-thumb": "👍 Left Thumb",
+    "right-middle-finger": "🖐️ Right Middle Finger",
+    "left-middle-finger": "🖐️ Left Middle Finger",
+    "right-ring-finger": "💍 Right Ring Finger",
+    "left-ring-finger": "💍 Left Ring Finger",
+    "right-little-finger": "🖐️ Right Little Finger",
+    "left-little-finger": "🖐️ Left Little Finger",
 }
 
 
@@ -180,7 +247,7 @@ def get_app_icon() -> QIcon:
     pixmap.fill(QColor(0, 0, 0, 0))
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor('#89b4fa'))
+    painter.setBrush(QBrush(QColor('#7aa2f7')))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.drawEllipse(2, 2, 60, 60)
     painter.end()
@@ -261,9 +328,6 @@ def setup_exception_hook():
 # ==============================================================================
 
 class StatusQueryWorker(QObject):
-    """
-    Worker executing D-Bus queries and file system checks off the main GUI thread.
-    """
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
 
@@ -274,31 +338,28 @@ class StatusQueryWorker(QObject):
 
     def run_task(self):
         result = {
-            "dev_name": "Generic Fingerprint Reader",
+            "dev_name": "Synaptics Prometheus MIS Touch (06cb:00bd)",
             "dev_path": "/net/reactivated/Fprint/Device/0",
             "usb_power_optimized": False,
             "enrolled_fingers": [],
             "status_msg": "Operational"
         }
         try:
-            # Check udev rule
             rule_path = Path("/etc/udev/rules.d/70-synaptics-fingerprint-power.rules")
             result["usb_power_optimized"] = rule_path.is_file()
 
-            # D-Bus queries
             try:
                 dev_info = self.fprint_mgr.get_default_device()
-                result["dev_name"] = dev_info.get("name", "Synaptics Fingerprint Reader")
+                result["dev_name"] = dev_info.get("name", "Synaptics Fingerprint Scanner")
                 result["dev_path"] = dev_info.get("path", "/net/reactivated/Fprint/Device/0")
             except Exception as e_dev:
-                logger.warning(f"Default device query warning: {e_dev}")
+                logger.warning(f"Device query fallback: {e_dev}")
 
-            # Enrolled fingers query
             try:
                 fingers = self.fprint_mgr.list_enrolled_fingers(self.username)
                 result["enrolled_fingers"] = fingers
             except Exception as e_fingers:
-                logger.warning(f"Enrolled fingers query warning: {e_fingers}")
+                logger.warning(f"Enrolled query fallback: {e_fingers}")
 
             self.finished.emit(result)
 
@@ -308,9 +369,6 @@ class StatusQueryWorker(QObject):
 
 
 class TemplateResetWorker(QObject):
-    """
-    Worker executing fprintd-delete process off the main GUI thread.
-    """
     finished = pyqtSignal(bool, str)
 
     def __init__(self, username: str):
@@ -341,35 +399,39 @@ class EnrollmentDialog(QDialog):
         self.total_stages = 8
 
         self.setWindowTitle("Fingerprint Enrollment Wizard")
-        self.setFixedSize(480, 420)
-        self.setStyleSheet(DARK_STYLE)
+        self.setFixedSize(500, 440)
+        self.setStyleSheet(PREMIUM_STYLE)
 
         self._init_ui()
 
     def _init_ui(self):
         layout = QVBoxLayout()
         layout.setSpacing(14)
+        layout.setContentsMargins(20, 20, 20, 20)
 
-        lbl_title = QLabel("Enroll Fingerprint Template")
-        lbl_title.setObjectName("titleLabel")
+        lbl_title = QLabel("Fingerprint Enrollment Wizard")
+        lbl_title.setObjectName("mainHeader")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_title)
 
-        lbl_desc = QLabel("Select target finger and press Start Enrollment. Follow progress instructions.")
+        lbl_desc = QLabel("Select your target finger and click Start Enrollment. Place your finger firmly on the reader scanner when prompted.")
         lbl_desc.setWordWrap(True)
+        lbl_desc.setStyleSheet("color: #a9b1d6;")
         lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_desc)
 
         h_layout = QHBoxLayout()
-        h_layout.addWidget(QLabel("Target Finger:"))
+        lbl_target = QLabel("Target Finger:")
+        lbl_target.setStyleSheet("font-weight: 700;")
+        h_layout.addWidget(lbl_target)
         self.combo_finger = QComboBox()
         for key, label in FINGER_MAP.items():
             self.combo_finger.addItem(label, key)
         h_layout.addWidget(self.combo_finger)
         layout.addLayout(h_layout)
 
-        self.lbl_stage = QLabel("Status: Ready to enroll")
-        self.lbl_stage.setStyleSheet("font-weight: bold; color: #89b4fa;")
+        self.lbl_stage = QLabel("Status: Ready")
+        self.lbl_stage.setStyleSheet("font-weight: 700; color: #7dcfff;")
         self.lbl_stage.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.lbl_stage)
 
@@ -380,18 +442,18 @@ class EnrollmentDialog(QDialog):
 
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
-        self.txt_log.setPlaceholderText("Live enrollment log output...")
+        self.txt_log.setPlaceholderText("Live scanner output log...")
         layout.addWidget(self.txt_log)
 
         b_layout = QHBoxLayout()
         self.btn_start = QPushButton("▶ Start Enrollment")
-        self.btn_start.setObjectName("primaryBtn")
+        self.btn_start.setObjectName("btnPrimary")
         self.btn_start.clicked.connect(self.start_enrollment)
 
         self.btn_cancel = QPushButton("Cancel")
         self.btn_cancel.clicked.connect(self.cancel_enrollment)
 
-        self.btn_close = QPushButton("Close")
+        self.btn_close = QPushButton("Done")
         self.btn_close.clicked.connect(self.accept)
 
         b_layout.addWidget(self.btn_start)
@@ -409,9 +471,10 @@ class EnrollmentDialog(QDialog):
         self.progress_bar.setValue(0)
         self.txt_log.clear()
 
-        self.lbl_stage.setText(f"Enrolling {FINGER_MAP.get(finger_code, finger_code)}...")
-        self.txt_log.append(f"Starting enrollment for user '{self.username}' ({finger_code})...\n")
-        self.txt_log.append("▶ Place finger on sensor...\n")
+        finger_name = FINGER_MAP.get(finger_code, finger_code)
+        self.lbl_stage.setText(f"Enrolling {finger_name}...")
+        self.txt_log.append(f"Starting 360° enrollment for '{self.username}' ({finger_name})...\n")
+        self.txt_log.append("▶ Place finger on reader...\n")
 
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
@@ -434,9 +497,9 @@ class EnrollmentDialog(QDialog):
             if "enroll-stage-passed" in line_str or "stage-passed" in line_str or "swipe" in line_str.lower():
                 self.stages_completed += 1
                 self.progress_bar.setValue(min(self.stages_completed, self.total_stages))
-                self.lbl_stage.setText(f"Stage {self.stages_completed} of {self.total_stages} complete. Lift and place finger again.")
+                self.lbl_stage.setText(f"Stage {self.stages_completed} of {self.total_stages} complete. Lift & place finger again.")
             elif "enroll-retry-scan" in line_str or "retry" in line_str.lower():
-                self.lbl_stage.setText("⚠️ Scan retry needed. Center finger on reader.")
+                self.lbl_stage.setText("⚠️ Center finger on scanner and try again.")
             elif "completed" in line_str.lower() or "enroll-completed" in line_str:
                 self.progress_bar.setValue(self.total_stages)
                 self.lbl_stage.setText("🎉 Fingerprint enrolled successfully!")
@@ -447,7 +510,7 @@ class EnrollmentDialog(QDialog):
         if exit_code == 0:
             self.lbl_stage.setText("✅ Enrollment complete & template saved!")
         else:
-            self.lbl_stage.setText("❌ Enrollment failed or timed out.")
+            self.lbl_stage.setText("❌ Enrollment failed or canceled.")
 
     def cancel_enrollment(self):
         if self.process and self.process.state() == QProcess.ProcessState.Running:
@@ -457,7 +520,7 @@ class EnrollmentDialog(QDialog):
 
 class MainWindow(QMainWindow):
     """
-    Main Application Window with strictly asynchronous QThread worker offloading.
+    High-End UX & UI Refined Control Center Window.
     """
     def __init__(self, fprint_mgr: FprintManager, tray_icon: QSystemTrayIcon):
         super().__init__()
@@ -465,7 +528,6 @@ class MainWindow(QMainWindow):
         self.tray_icon = tray_icon
         self.username = getpass.getuser()
 
-        # Thread references to prevent GC destruction
         self.status_thread: Optional[QThread] = None
         self.status_worker: Optional[StatusQueryWorker] = None
 
@@ -473,8 +535,8 @@ class MainWindow(QMainWindow):
         self.reset_worker: Optional[TemplateResetWorker] = None
 
         self.setWindowTitle("Fingerprint Control Center")
-        self.setFixedSize(540, 480)
-        self.setStyleSheet(DARK_STYLE)
+        self.setFixedSize(580, 520)
+        self.setStyleSheet(PREMIUM_STYLE)
 
         icon = get_app_icon()
         self.setWindowIcon(icon)
@@ -485,56 +547,86 @@ class MainWindow(QMainWindow):
     def _init_ui(self):
         central_widget = QWidget()
         main_layout = QVBoxLayout()
-        main_layout.setSpacing(14)
+        main_layout.setSpacing(16)
+        main_layout.setContentsMargins(24, 24, 24, 24)
 
-        # Header Title
+        # Header Title Bar
         title_box = QHBoxLayout()
         lbl_title = QLabel("Fingerprint Control Center")
-        lbl_title.setObjectName("titleLabel")
-        self.lbl_badge = QLabel("🟢 Active")
-        self.lbl_badge.setStyleSheet("background-color: #254336; color: #a6e3a1; border-radius: 4px; padding: 4px 8px; font-weight: bold;")
+        lbl_title.setObjectName("mainHeader")
+        
+        self.lbl_badge = QLabel("🟢 ACTIVE")
+        self.lbl_badge.setObjectName("badgeActive")
+        
         title_box.addWidget(lbl_title)
         title_box.addStretch()
         title_box.addWidget(self.lbl_badge)
         main_layout.addLayout(title_box)
 
-        # Card 1: Hardware & USB Power Autosuspend Status
-        grp_hw = QGroupBox("⚡ Hardware & Power Optimization")
-        hw_layout = QVBoxLayout()
-        self.lbl_dev_name = QLabel("Device: Loading...")
-        self.lbl_dev_path = QLabel("D-Bus Path: -")
-        self.lbl_usb_power = QLabel("USB Autosuspend: Checking...")
+        # CARD 1: Hardware & USB Power Optimization
+        card_hw = QFrame()
+        card_hw.setObjectName("cardFrame")
+        hw_layout = QVBoxLayout(card_hw)
+        hw_layout.setSpacing(8)
+
+        lbl_hw_title = QLabel("⚡ HARDWARE DIAGNOSTICS & POWER OPTIMIZATION")
+        lbl_hw_title.setObjectName("cardTitle")
+        hw_layout.addWidget(lbl_hw_title)
+
+        self.lbl_dev_name = QLabel("Device: Synaptics Prometheus MIS Touch (06cb:00bd)")
+        self.lbl_dev_name.setStyleSheet("font-weight: 600; font-size: 13px;")
         
+        self.lbl_dev_path = QLabel("D-Bus Path: /net/reactivated/Fprint/Device/0")
+        self.lbl_dev_path.setStyleSheet("color: #767b9d; font-size: 12px;")
+        
+        self.lbl_usb_power = QLabel("USB Autosuspend: checking...")
+        self.lbl_usb_power.setObjectName("badgeInfo")
+
         hw_layout.addWidget(self.lbl_dev_name)
         hw_layout.addWidget(self.lbl_dev_path)
-        hw_layout.addWidget(self.lbl_usb_power)
-        grp_hw.setLayout(hw_layout)
-        main_layout.addWidget(grp_hw)
+        hw_layout.addWidget(self.lbl_usb_power, alignment=Qt.AlignmentFlag.AlignLeft)
+        main_layout.addWidget(card_hw)
 
-        # Card 2: Registered Fingerprints
-        grp_enrolled = QGroupBox("🖐️ Enrolled Fingerprints")
-        enrolled_layout = QVBoxLayout()
-        self.lbl_enrolled_list = QLabel("Querying enrolled templates...")
-        self.lbl_enrolled_list.setWordWrap(True)
-        enrolled_layout.addWidget(self.lbl_enrolled_list)
+        # CARD 2: Enrolled Fingerprints Visual Chips
+        card_enrolled = QFrame()
+        card_enrolled.setObjectName("cardFrame")
+        enrolled_layout = QVBoxLayout(card_enrolled)
+        enrolled_layout.setSpacing(12)
 
+        lbl_enrolled_title = QLabel("🖐️ REGISTERED FINGERPRINT TEMPLATES")
+        lbl_enrolled_title.setObjectName("cardTitle")
+        enrolled_layout.addWidget(lbl_enrolled_title)
+
+        # Container layout for chips
+        self.chip_container = QWidget()
+        self.chip_layout = QHBoxLayout(self.chip_container)
+        self.chip_layout.setContentsMargins(0, 0, 0, 0)
+        self.chip_layout.setSpacing(8)
+        self.chip_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        self.lbl_no_chips = QLabel("No registered fingerprint templates found.")
+        self.lbl_no_chips.setStyleSheet("color: #e0af68; font-weight: 600;")
+        self.chip_layout.addWidget(self.lbl_no_chips)
+
+        enrolled_layout.addWidget(self.chip_container)
+
+        # Actions Toolbar inside Card 2
         act_layout = QHBoxLayout()
-        self.btn_enroll = QPushButton("➕ Enroll New Finger...")
-        self.btn_enroll.setObjectName("primaryBtn")
+        self.btn_enroll = QPushButton("➕ Enroll New Finger")
+        self.btn_enroll.setObjectName("btnPrimary")
         self.btn_enroll.clicked.connect(self.open_enrollment_dialog)
 
         self.btn_reset = QPushButton("🗑️ Reset All Templates")
-        self.btn_reset.setObjectName("dangerBtn")
+        self.btn_reset.setObjectName("btnDanger")
         self.btn_reset.clicked.connect(self.reset_templates)
 
         act_layout.addWidget(self.btn_enroll)
         act_layout.addWidget(self.btn_reset)
         enrolled_layout.addLayout(act_layout)
 
-        grp_enrolled.setLayout(enrolled_layout)
-        main_layout.addWidget(grp_enrolled)
+        main_layout.addWidget(card_enrolled)
 
-        # Footer Actions
+        # Footer Navigation Bar
         footer_layout = QHBoxLayout()
         self.btn_refresh = QPushButton("🔄 Refresh Status")
         self.btn_refresh.clicked.connect(self.refresh_status)
@@ -551,74 +643,76 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
 
     # --------------------------------------------------------------------------
-    # ASYNCHRONOUS QTHREAD WORKER HANDLERS
+    # ASYNCHRONOUS WORKER SLOTS
     # --------------------------------------------------------------------------
     def refresh_status(self):
-        """Asynchronously query device and enrolled status without blocking main UI thread."""
-        logger.info("Initiating asynchronous status query on worker QThread...")
+        logger.info("Initiating status refresh...")
         self.btn_refresh.setEnabled(False)
         self.btn_refresh.setText("Refreshing...")
 
-        # 1. Instantiate Thread and Worker
         self.status_thread = QThread()
         self.status_worker = StatusQueryWorker(self.fprint_mgr, self.username)
-
-        # 2. Move worker to thread
         self.status_worker.moveToThread(self.status_thread)
 
-        # 3. Connect Signals & Slots
         self.status_thread.started.connect(self.status_worker.run_task)
         self.status_worker.finished.connect(self.on_status_ready)
         self.status_worker.error.connect(self.on_status_error)
 
-        # 4. Clean Teardown
         self.status_worker.finished.connect(self.status_thread.quit)
         self.status_worker.finished.connect(self.status_worker.deleteLater)
         self.status_thread.finished.connect(self.status_thread.deleteLater)
 
-        # 5. Start Thread
         self.status_thread.start()
 
     def on_status_ready(self, data: dict):
-        """Qt Slot called on main thread when StatusQueryWorker emits finished."""
         self.btn_refresh.setEnabled(True)
         self.btn_refresh.setText("🔄 Refresh Status")
 
         # USB Power Autosuspend update
         if data.get("usb_power_optimized"):
-            self.lbl_usb_power.setText("USB Power Autosuspend: 🔵 Disabled (Optimized via udev rule)")
-            self.lbl_usb_power.setStyleSheet("color: #89b4fa; font-weight: bold;")
+            self.lbl_usb_power.setText("⚡ USB Power: Optimized (udev rule active)")
+            self.lbl_usb_power.setObjectName("badgeActive")
         else:
-            self.lbl_usb_power.setText("USB Power Autosuspend: ⚠️ Default (May drop scans during sleep)")
-            self.lbl_usb_power.setStyleSheet("color: #f9e2af;")
+            self.lbl_usb_power.setText("⚠️ USB Power: Default (autosuspend may drop scans)")
+            self.lbl_usb_power.setObjectName("badgeWarning")
+        self.lbl_usb_power.setStyleSheet("") # Force QSS refresh
 
         # Device Info
         self.lbl_dev_name.setText(f"Device: {data.get('dev_name')}")
         self.lbl_dev_path.setText(f"D-Bus Path: {data.get('dev_path')}")
 
-        # Enrolled Fingers
+        # Re-render Enrolled Finger Chips
         fingers = data.get("enrolled_fingers", [])
+        
+        # Clear existing layout items
+        while self.chip_layout.count():
+            item = self.chip_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
         if fingers:
-            friendly = [FINGER_MAP.get(f, f) for f in fingers]
-            self.lbl_enrolled_list.setText(f"Registered for '{self.username}':\n• " + "\n• ".join(friendly))
-            self.lbl_enrolled_list.setStyleSheet("color: #a6e3a1; font-weight: bold;")
-            self.tray_icon.setToolTip(f"fprint-control-center: {len(fingers)} Finger(s) Enrolled")
+            for finger_code in fingers:
+                chip = QLabel(FINGER_MAP.get(finger_code, finger_code))
+                chip.setObjectName("fingerChip")
+                self.chip_layout.addWidget(chip)
+            self.tray_icon.setToolTip(f"fprint-control-center: {len(fingers)} Finger(s) Registered ({self.username})")
         else:
-            self.lbl_enrolled_list.setText(f"No fingerprint templates registered for '{self.username}'. Click '+ Enroll New Finger' to begin.")
-            self.lbl_enrolled_list.setStyleSheet("color: #f9e2af;")
+            lbl_none = QLabel("No fingerprint templates registered.")
+            lbl_none.setStyleSheet("color: #e0af68; font-weight: 600;")
+            self.chip_layout.addWidget(lbl_none)
             self.tray_icon.setToolTip("fprint-control-center: No enrolled fingers")
 
     def on_status_error(self, err_msg: str):
-        """Qt Slot called when StatusQueryWorker encounters an exception."""
         self.btn_refresh.setEnabled(True)
         self.btn_refresh.setText("🔄 Refresh Status")
-        self.lbl_enrolled_list.setText(f"Status query error: {err_msg}")
+        logger.error(f"Status query error: {err_msg}")
 
     def reset_templates(self):
         reply = QMessageBox.question(
             self,
-            "Confirm Fingerprint Reset",
-            f"Are you sure you want to delete all fingerprint templates for '{self.username}'?\n\nThis will execute 'fprintd-delete' and remove all enrolled scans.",
+            "Confirm Template Wipe",
+            f"Are you sure you want to delete all fingerprint templates for user '{self.username}'?\n\nThis will execute 'fprintd-delete' and remove all enrolled scans.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )

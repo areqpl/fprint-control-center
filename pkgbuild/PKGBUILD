@@ -1,5 +1,5 @@
 pkgname=fprint-control-center
-pkgver=1.2.1
+pkgver=1.3.0
 pkgrel=1
 pkgdesc='Robust PyQt6 control center daemon for fingerprint devices'
 arch=('any')

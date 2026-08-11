@@ -1,8 +1,8 @@
-# fprint-control-center v1.2.1
+# fprint-control-center v1.3.0
 
 A background system tray daemon and GUI control center for `fprintd` fingerprint devices on Arch Linux and CachyOS. It addresses fingerprint scanner wake-up dropouts, provides a persistent PyQt6 system tray interface, interactive fingerprint enrollment, template reset, and USB power management diagnostics.
 
-## Key Features in v1.2.1
+## Key Features in v1.3.0
 
 - **Persistent System Tray Icon (`QSystemTrayIcon`)**:
   - Operates continuously in the system tray (`app.setQuitOnLastWindowClosed(False)`).
@@ -50,7 +50,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 fprint-control-center/
 ├── README.md
 ├── pkgbuild/
-│   └── PKGBUILD            # Arch Linux package build script (v1.2.1)
+│   └── PKGBUILD            # Arch Linux package build script (v1.3.0)
 ├── resources/
 │   └── icon.png            # System tray & window icon asset
 ├── src/
@@ -125,7 +125,7 @@ makepkg -f
 
 Install built package:
 ```bash
-sudo pacman -U fprint-control-center-1.2.1-1-any.pkg.tar.zst
+sudo pacman -U fprint-control-center-1.3.0-1-any.pkg.tar.zst
 ```
 
 ---
