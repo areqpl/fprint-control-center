@@ -6,15 +6,12 @@ arch=('any')
 url='https://github.com/areqpl/fprint-control-center'
 license=('MIT')
 depends=('python' 'python-pyqt6')
-source=('main.py::../src/main.py'
-        'icon.png::../resources/icon.png'
-        'README.md::../README.md'
-        'fprint-control-center.service::../systemd/fprint-control-center.service')
-sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+source=()
+sha256sums=()
 
 package() {
-    install -Dm755 "$srcdir/main.py" "$pkgdir/usr/bin/fprint-control-center"
-    install -Dm644 "$srcdir/icon.png" "$pkgdir/usr/share/pixmaps/fprint-control-center.png"
-    install -Dm644 "$srcdir/README.md" "$pkgdir/usr/share/doc/fprint-control-center/README.md"
-    install -Dm644 "$srcdir/fprint-control-center.service" "$pkgdir/usr/lib/systemd/user/fprint-control-center.service"
+    install -Dm755 "$startdir/../src/main.py" "$pkgdir/usr/bin/fprint-control-center"
+    install -Dm644 "$startdir/../resources/icon.png" "$pkgdir/usr/share/pixmaps/fprint-control-center.png"
+    install -Dm644 "$startdir/../README.md" "$pkgdir/usr/share/doc/fprint-control-center/README.md"
+    install -Dm644 "$startdir/../systemd/fprint-control-center.service" "$pkgdir/usr/lib/systemd/user/fprint-control-center.service"
 }
