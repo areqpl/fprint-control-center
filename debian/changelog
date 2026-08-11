@@ -1,0 +1,9 @@
+fprint-control-center (1.7.0-1) unstable; urgency=medium
+
+  * Multi-distro v1.7.0 release.
+  * Synaptics & generic USB reader autosuspend power optimization.
+  * Configurable 360-degree 5-to-12 stage fingerprint enrollment.
+  * Password manager PAM bridge (KeePassXC, Bitwarden, SUDO_ASKPASS).
+  * Interactive verification match tester GUI.
+
+ -- areqpl <areqpl@github.com>  Tue, 11 Aug 2026 22:30:00 +0200

@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon, QMenu, QDialog, QComboBox, QTextEdit,
     QProgressBar, QGroupBox, QTabWidget, QSpinBox, QCheckBox
 )
-from PyQt6.QtCore import Qt, QSocketNotifier, QProcess, pyqtSignal, QObject, QThread
+from PyQt6.QtCore import Qt, QSocketNotifier, QProcess, pyqtSignal, QObject, QThread, QSettings
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QBrush
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
@@ -332,7 +332,10 @@ def setup_exception_hook():
         if issubclass(exctype, KeyboardInterrupt):
             sys.__excepthook__(exctype, value, tb)
             return
-        logger.debug(f"Exception handled quietly: {sanitize_error_message(value)}")
+        # Log full exception with traceback to aid debugging but avoid leaking paths
+        logger.exception(f"Uncaught exception: {sanitize_error_message(value)}")
+        # Optionally, display a user-friendly message or silently ignore
+        # Here we keep silent to avoid journal clutter
     sys.excepthook = custom_excepthook
 
 
@@ -587,6 +590,9 @@ class MainWindow(QMainWindow):
         self.tray_icon = tray_icon
         self.username = getpass.getuser()
         self.start_daemon = start_daemon
+        self.settings = QSettings("areqpl", "fprint-control-center")
+        self.icon_state = self.settings.value("icon_state", "default")
+        self.load_settings()
 
         self.status_thread: Optional[QThread] = None
         self.status_worker: Optional[StatusQueryWorker] = None
@@ -725,9 +731,42 @@ class MainWindow(QMainWindow):
         self.chk_high_perf = QCheckBox("⚡ High-Responsiveness Mode (udev power/control=on)")
         self.chk_high_perf.setChecked(True)
         self.chk_high_perf.setStyleSheet("color: #7dcfff; font-weight: 600;")
+        self.chk_high_perf.stateChanged.connect(self.save_settings)
+        self.spin_stages.valueChanged.connect(self.save_settings)
         resp_layout.addWidget(self.chk_high_perf)
 
         set_layout.addWidget(card_resp)
+
+        # CARD 3: Fingerprint Capture Settings
+        card_fprint = QFrame()
+        card_fprint.setObjectName("cardFrame")
+        fprint_layout = QVBoxLayout(card_fprint)
+        fprint_layout.setSpacing(8)
+
+        lbl_fprint_title = QLabel("🔐 FINGERPRINT CAPTURE SETTINGS")
+        lbl_fprint_title.setObjectName("cardTitle")
+        fprint_layout.addWidget(lbl_fprint_title)
+
+        self.chk_capture_enabled = QCheckBox("Enable Fingerprint Capture")
+        self.chk_capture_enabled.setChecked(True)
+        self.chk_capture_enabled.stateChanged.connect(self.save_settings)
+        fprint_layout.addWidget(self.chk_capture_enabled)
+
+        h_capture = QHBoxLayout()
+        h_capture.addWidget(QLabel("Number of Capture Positions:"))
+        self.spin_capture_positions = QSpinBox()
+        self.spin_capture_positions.setRange(1, 5)
+        self.spin_capture_positions.setValue(3)
+        self.spin_capture_positions.valueChanged.connect(self.save_settings)
+        h_capture.addWidget(self.spin_capture_positions)
+        h_capture.addStretch()
+        fprint_layout.addLayout(h_capture)
+
+        self.btn_switch_icon = QPushButton("Switch App Icon")
+        self.btn_switch_icon.clicked.connect(self.toggle_app_icon)
+        fprint_layout.addWidget(self.btn_switch_icon)
+
+        set_layout.addWidget(card_fprint)
 
         # CARD 4: Password Managers & Terminal PAM Integration
         card_pam = QFrame()
@@ -796,6 +835,33 @@ class MainWindow(QMainWindow):
     def show_pam_guide(self):
         dialog = PamGuideDialog(self)
         dialog.exec()
+
+    def load_settings(self):
+        # Load persisted settings
+        capture_enabled = self.settings.value("capture_enabled", True, type=bool)
+        self.chk_capture_enabled.setChecked(capture_enabled)
+        capture_positions = self.settings.value("capture_positions", 3, type=int)
+        self.spin_capture_positions.setValue(capture_positions)
+        self.icon_state = self.settings.value("icon_state", "default")
+        if self.icon_state == "fingerprint":
+            self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "fingerprint.svg")))
+        else:
+            self.setWindowIcon(get_app_icon())
+
+    def save_settings(self):
+        # Persist current UI state
+        self.settings.setValue("capture_enabled", self.chk_capture_enabled.isChecked())
+        self.settings.setValue("capture_positions", self.spin_capture_positions.value())
+        self.settings.setValue("icon_state", self.icon_state)
+
+    def toggle_app_icon(self):
+        if getattr(self, "icon_state", "default") == "default":
+            self.icon_state = "fingerprint"
+            self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "fingerprint.svg")))
+        else:
+            self.icon_state = "default"
+            self.setWindowIcon(get_app_icon())
+        self.save_settings()
 
     # --------------------------------------------------------------------------
     # ASYNCHRONOUS WORKER SLOTS

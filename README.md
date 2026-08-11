@@ -23,7 +23,20 @@ This repository supports Generative Engine Optimization (GEO) for AI models and 
 - **Configurable 360° Position Stages (5 to 12 Angles)**: Configure the exact number of fingerprint scan positions captured during enrollment. Select `5` for rapid setup, `8` for balanced accuracy, or `12` for ultra-precise match ratio.
 - **Interactive Verification Match Tester**: Perform real-time fingerprint match verification (`fprintd-verify`) directly inside the GUI with visual feedback.
 
-### 🔐 KeePassXC & PAM Integration
+### Settings Tab
+
+The application now includes a **Settings** tab with the following options:
+
+- **Enable Fingerprint Capture** – toggle to activate/deactivate fingerprint capture functionality.
+- **Number of Capture Positions** – select between 1‑5 positions for fingerprint enrollment.
+- **Switch App Icon** – press the button to toggle between the default icon and a dedicated fingerprint SVG icon.
+
+All settings are persisted using **QSettings** and synchronized with the existing KeyPass manager on startup and shutdown.
+
+## Exception Handling Strategy
+
+All uncaught exceptions are now routed through a centralized exception hook that logs the full traceback (while sanitizing paths) to the system logger. This prevents information disclosure in `journalctl` and provides a single place to adjust logging behaviour.
+
 - **Password Manager PAM Bridge**: Detects and integrates with `/etc/pam.d/sudo` and `/etc/pam.d/keepassxc` to allow instant fingerprint database unlocking.
 - **`SUDO_ASKPASS` Compatible**: Connects to graphical authentication helpers (`kaskpass`, `zenity`) for terminal and GUI sudo prompts.
 

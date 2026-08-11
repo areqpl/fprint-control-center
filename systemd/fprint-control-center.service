@@ -6,7 +6,7 @@ Wants=fprintd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /home/owlyyy/fprint-control-center/src/main.py --background
+ExecStart=/usr/bin/fprint-control-center --background
 Restart=on-failure
 RestartSec=5s
 Environment=PYTHONUNBUFFERED=1

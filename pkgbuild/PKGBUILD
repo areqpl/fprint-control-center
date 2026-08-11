@@ -15,6 +15,7 @@ package() {
     install -Dm644 "$startdir/../src/__init__.py" "$pkgdir/usr/lib/fprint-control-center/__init__.py"
     install -Dm644 "$startdir/../src/exceptions.py" "$pkgdir/usr/lib/fprint-control-center/exceptions.py"
     install -Dm644 "$startdir/../src/fprint_manager.py" "$pkgdir/usr/lib/fprint-control-center/fprint_manager.py"
+    install -Dm644 "$startdir/../src/pam_bridge.py" "$pkgdir/usr/lib/fprint-control-center/pam_bridge.py"
     install -Dm755 "$startdir/../src/main.py" "$pkgdir/usr/lib/fprint-control-center/main.py"
 
     install -d "$pkgdir/usr/bin"
