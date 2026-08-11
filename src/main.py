@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-fprint-control-center v1.2.0: PyQt6 Daemon & Fingerprint Management GUI.
-Engineered with heavy UX Design Best Practices:
- - Visual Hierarchy: Catppuccin Mocha Dark Theme QSS (WCAG 2.1 AA compliant contrast)
- - Progressive Disclosure & Cognitive Load Management: Card layouts, primary call-to-action buttons, danger styling
- - System Tray Integration: QSystemTrayIcon with instant toggle, desktop notifications, & status tooltips
- - Asynchronous Wizard: Non-blocking QProcess EnrollmentDialog with stage progress bar and live microcopy feedback
- - Robust Lifecycle: SingleInstanceLock, sys.excepthook, UnixSignalNotifier socket handlers
+fprint-control-center v1.2.1: PyQt6 Desktop GUI Application & Daemon.
+Re-architected strictly following PyQt6 Desktop GUI Development Best Practices:
+ - Golden Rule: All D-Bus I/O, subprocess execution, and disk checks offloaded to QThread workers
+ - Garbage Collection Protection: Active references held for all worker threads
+ - Strict Thread Safety: UI widget state mutated exclusively via pyqtSignal slots
+ - Modern QSS & Visual Hierarchy: Responsive controls, Catppuccin Mocha styling, disabled/hover states
 """
 
 import sys
@@ -18,7 +17,7 @@ import getpass
 import traceback
 import subprocess
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -28,10 +27,9 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon, QMenu, QDialog, QComboBox, QTextEdit,
     QProgressBar, QGroupBox, QGridLayout
 )
-from PyQt6.QtCore import Qt, QSocketNotifier, QProcess, pyqtSignal
+from PyQt6.QtCore import Qt, QSocketNotifier, QProcess, pyqtSignal, QObject, QThread
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QFont
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
-
 
 from exceptions import (
     FprintControlError,
@@ -80,10 +78,6 @@ QLabel#titleLabel {
     font-weight: bold;
     color: #cba6f7;
 }
-QLabel#subtitleLabel {
-    font-size: 12px;
-    color: #a6adc8;
-}
 QPushButton {
     background-color: #313244;
     color: #cdd6f4;
@@ -100,6 +94,11 @@ QPushButton:hover {
 QPushButton:pressed {
     background-color: #585b70;
 }
+QPushButton:disabled {
+    background-color: #181825;
+    color: #6c7086;
+    border-color: #313244;
+}
 QPushButton#primaryBtn {
     background-color: #89b4fa;
     color: #11111b;
@@ -108,6 +107,10 @@ QPushButton#primaryBtn {
 QPushButton#primaryBtn:hover {
     background-color: #b4befe;
 }
+QPushButton#primaryBtn:disabled {
+    background-color: #45475a;
+    color: #7f849c;
+}
 QPushButton#dangerBtn {
     background-color: #f38ba8;
     color: #11111b;
@@ -115,6 +118,10 @@ QPushButton#dangerBtn {
 }
 QPushButton#dangerBtn:hover {
     background-color: #f5e0dc;
+}
+QPushButton#dangerBtn:disabled {
+    background-color: #45475a;
+    color: #7f849c;
 }
 QProgressBar {
     border: 1px solid #45475a;
@@ -166,17 +173,16 @@ def get_app_icon() -> QIcon:
         Path(__file__).resolve().parent / 'resources' / 'icon.png',
     ]
     for path in candidates:
-        if path.is_file():
+        if path.is_file() and path.stat().st_size > 200:
             return QIcon(str(path))
     
-    # Programmatic SVG fallback
     pixmap = QPixmap(64, 64)
     pixmap.fill(QColor(0, 0, 0, 0))
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setBrush(QColor('#89b4fa'))
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawEllipse(4, 4, 56, 56)
+    painter.drawEllipse(2, 2, 60, 60)
     painter.end()
     return QIcon(pixmap)
 
@@ -192,11 +198,11 @@ class SingleInstanceLock:
         test_socket.connectToServer(self.server_name)
         if test_socket.waitForConnected(500):
             test_socket.disconnectFromServer()
-            raise SingleInstanceError(f"Another instance of fprint-control-center is running.")
+            raise SingleInstanceError("Another instance of fprint-control-center is running.")
         QLocalServer.removeServer(self.server_name)
         if not self.server.listen(self.server_name):
-            raise SingleInstanceError(f"Failed to acquire single instance lock.")
-        logger.info(f"Single-instance lock acquired.")
+            raise SingleInstanceError("Failed to acquire single instance lock.")
+        logger.info("Single-instance lock acquired.")
 
     def release(self) -> None:
         if self.server.isListening():
@@ -238,7 +244,7 @@ def setup_exception_hook():
         if issubclass(exctype, KeyboardInterrupt):
             sys.__excepthook__(exctype, value, tb)
             return
-        logger.critical("Unhandled exception:", exc_info=(exctype, value, tb))
+        logger.critical("Unhandled exception caught:", exc_info=(exctype, value, tb))
         app = QApplication.instance()
         if app:
             msg_box = QMessageBox()
@@ -250,10 +256,83 @@ def setup_exception_hook():
     sys.excepthook = custom_excepthook
 
 
+# ==============================================================================
+# WORKER OBJECTS (PyQt6 QThread Concurrency Pattern)
+# ==============================================================================
+
+class StatusQueryWorker(QObject):
+    """
+    Worker executing D-Bus queries and file system checks off the main GUI thread.
+    """
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, fprint_mgr: FprintManager, username: str):
+        super().__init__()
+        self.fprint_mgr = fprint_mgr
+        self.username = username
+
+    def run_task(self):
+        result = {
+            "dev_name": "Generic Fingerprint Reader",
+            "dev_path": "/net/reactivated/Fprint/Device/0",
+            "usb_power_optimized": False,
+            "enrolled_fingers": [],
+            "status_msg": "Operational"
+        }
+        try:
+            # Check udev rule
+            rule_path = Path("/etc/udev/rules.d/70-synaptics-fingerprint-power.rules")
+            result["usb_power_optimized"] = rule_path.is_file()
+
+            # D-Bus queries
+            try:
+                dev_info = self.fprint_mgr.get_default_device()
+                result["dev_name"] = dev_info.get("name", "Synaptics Fingerprint Reader")
+                result["dev_path"] = dev_info.get("path", "/net/reactivated/Fprint/Device/0")
+            except Exception as e_dev:
+                logger.warning(f"Default device query warning: {e_dev}")
+
+            # Enrolled fingers query
+            try:
+                fingers = self.fprint_mgr.list_enrolled_fingers(self.username)
+                result["enrolled_fingers"] = fingers
+            except Exception as e_fingers:
+                logger.warning(f"Enrolled fingers query warning: {e_fingers}")
+
+            self.finished.emit(result)
+
+        except Exception as exc:
+            logger.error(f"StatusQueryWorker exception: {exc}")
+            self.error.emit(str(exc))
+
+
+class TemplateResetWorker(QObject):
+    """
+    Worker executing fprintd-delete process off the main GUI thread.
+    """
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, username: str):
+        super().__init__()
+        self.username = username
+
+    def run_task(self):
+        try:
+            res = subprocess.run(["fprintd-delete", self.username], capture_output=True, text=True, timeout=10)
+            if res.returncode == 0:
+                self.finished.emit(True, f"Successfully deleted all templates for '{self.username}'.")
+            else:
+                self.finished.emit(False, res.stderr or res.stdout or "fprintd-delete failed.")
+        except Exception as exc:
+            self.finished.emit(False, str(exc))
+
+
+# ==============================================================================
+# UI COMPONENTS & WINDOWS
+# ==============================================================================
+
 class EnrollmentDialog(QDialog):
-    """
-    Interactive UX Fingerprint Enrollment Wizard Dialog.
-    """
     def __init__(self, parent=None, username: str = ""):
         super().__init__(parent)
         self.username = username or getpass.getuser()
@@ -271,18 +350,16 @@ class EnrollmentDialog(QDialog):
         layout = QVBoxLayout()
         layout.setSpacing(14)
 
-        # Header
         lbl_title = QLabel("Enroll Fingerprint Template")
         lbl_title.setObjectName("titleLabel")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_title)
 
-        lbl_desc = QLabel("Select your target finger and press Start Enrollment. Follow the progress instructions below.")
+        lbl_desc = QLabel("Select target finger and press Start Enrollment. Follow progress instructions.")
         lbl_desc.setWordWrap(True)
         lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_desc)
 
-        # Finger Selection Dropdown
         h_layout = QHBoxLayout()
         h_layout.addWidget(QLabel("Target Finger:"))
         self.combo_finger = QComboBox()
@@ -291,7 +368,6 @@ class EnrollmentDialog(QDialog):
         h_layout.addWidget(self.combo_finger)
         layout.addLayout(h_layout)
 
-        # Progress Section
         self.lbl_stage = QLabel("Status: Ready to enroll")
         self.lbl_stage.setStyleSheet("font-weight: bold; color: #89b4fa;")
         self.lbl_stage.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -302,13 +378,11 @@ class EnrollmentDialog(QDialog):
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
 
-        # Log Output
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
-        self.txt_log.setPlaceholderText("Live enrollment output will appear here...")
+        self.txt_log.setPlaceholderText("Live enrollment log output...")
         layout.addWidget(self.txt_log)
 
-        # Buttons
         b_layout = QHBoxLayout()
         self.btn_start = QPushButton("▶ Start Enrollment")
         self.btn_start.setObjectName("primaryBtn")
@@ -337,7 +411,7 @@ class EnrollmentDialog(QDialog):
 
         self.lbl_stage.setText(f"Enrolling {FINGER_MAP.get(finger_code, finger_code)}...")
         self.txt_log.append(f"Starting enrollment for user '{self.username}' ({finger_code})...\n")
-        self.txt_log.append("▶ Place your finger firmly on the reader scanner...\n")
+        self.txt_log.append("▶ Place finger on sensor...\n")
 
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
@@ -362,7 +436,7 @@ class EnrollmentDialog(QDialog):
                 self.progress_bar.setValue(min(self.stages_completed, self.total_stages))
                 self.lbl_stage.setText(f"Stage {self.stages_completed} of {self.total_stages} complete. Lift and place finger again.")
             elif "enroll-retry-scan" in line_str or "retry" in line_str.lower():
-                self.lbl_stage.setText("⚠️ Scan retry needed. Center your finger and try again.")
+                self.lbl_stage.setText("⚠️ Scan retry needed. Center finger on reader.")
             elif "completed" in line_str.lower() or "enroll-completed" in line_str:
                 self.progress_bar.setValue(self.total_stages)
                 self.lbl_stage.setText("🎉 Fingerprint enrolled successfully!")
@@ -372,28 +446,31 @@ class EnrollmentDialog(QDialog):
         self.combo_finger.setEnabled(True)
         if exit_code == 0:
             self.lbl_stage.setText("✅ Enrollment complete & template saved!")
-            self.txt_log.append("\n✅ Fingerprint template saved successfully.")
         else:
             self.lbl_stage.setText("❌ Enrollment failed or timed out.")
-            self.txt_log.append(f"\n❌ Process exited with code {exit_code}.")
 
     def cancel_enrollment(self):
         if self.process and self.process.state() == QProcess.ProcessState.Running:
             self.process.terminate()
-            self.txt_log.append("\n⚠️ Enrollment process canceled by user.")
-            self.lbl_stage.setText("Canceled")
         self.reject()
 
 
 class MainWindow(QMainWindow):
     """
-    UX-Refined Main Control Center Window.
+    Main Application Window with strictly asynchronous QThread worker offloading.
     """
     def __init__(self, fprint_mgr: FprintManager, tray_icon: QSystemTrayIcon):
         super().__init__()
         self.fprint_mgr = fprint_mgr
         self.tray_icon = tray_icon
         self.username = getpass.getuser()
+
+        # Thread references to prevent GC destruction
+        self.status_thread: Optional[QThread] = None
+        self.status_worker: Optional[StatusQueryWorker] = None
+
+        self.reset_thread: Optional[QThread] = None
+        self.reset_worker: Optional[TemplateResetWorker] = None
 
         self.setWindowTitle("Fingerprint Control Center")
         self.setFixedSize(540, 480)
@@ -414,7 +491,7 @@ class MainWindow(QMainWindow):
         title_box = QHBoxLayout()
         lbl_title = QLabel("Fingerprint Control Center")
         lbl_title.setObjectName("titleLabel")
-        self.lbl_badge = QLabel("🟢 System Active")
+        self.lbl_badge = QLabel("🟢 Active")
         self.lbl_badge.setStyleSheet("background-color: #254336; color: #a6e3a1; border-radius: 4px; padding: 4px 8px; font-weight: bold;")
         title_box.addWidget(lbl_title)
         title_box.addStretch()
@@ -424,25 +501,20 @@ class MainWindow(QMainWindow):
         # Card 1: Hardware & USB Power Autosuspend Status
         grp_hw = QGroupBox("⚡ Hardware & Power Optimization")
         hw_layout = QVBoxLayout()
-        self.lbl_dev_name = QLabel("Device: Checking scanner...")
+        self.lbl_dev_name = QLabel("Device: Loading...")
         self.lbl_dev_path = QLabel("D-Bus Path: -")
-        self.lbl_usb_power = QLabel("USB Autosuspend: Checking udev rule...")
+        self.lbl_usb_power = QLabel("USB Autosuspend: Checking...")
         
         hw_layout.addWidget(self.lbl_dev_name)
         hw_layout.addWidget(self.lbl_dev_path)
         hw_layout.addWidget(self.lbl_usb_power)
-
-        self.btn_usb_check = QPushButton("🔍 Check USB Autosuspend")
-        self.btn_usb_check.clicked.connect(self.check_usb_autosuspend_dialog)
-        hw_layout.addWidget(self.btn_usb_check, alignment=Qt.AlignmentFlag.AlignLeft)
-
         grp_hw.setLayout(hw_layout)
         main_layout.addWidget(grp_hw)
 
         # Card 2: Registered Fingerprints
         grp_enrolled = QGroupBox("🖐️ Enrolled Fingerprints")
         enrolled_layout = QVBoxLayout()
-        self.lbl_enrolled_list = QLabel("Loading enrolled templates...")
+        self.lbl_enrolled_list = QLabel("Querying enrolled templates...")
         self.lbl_enrolled_list.setWordWrap(True)
         enrolled_layout.addWidget(self.lbl_enrolled_list)
 
@@ -478,49 +550,69 @@ class MainWindow(QMainWindow):
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
 
+    # --------------------------------------------------------------------------
+    # ASYNCHRONOUS QTHREAD WORKER HANDLERS
+    # --------------------------------------------------------------------------
     def refresh_status(self):
-        logger.info("Refreshing GUI fingerprint status...")
+        """Asynchronously query device and enrolled status without blocking main UI thread."""
+        logger.info("Initiating asynchronous status query on worker QThread...")
+        self.btn_refresh.setEnabled(False)
+        self.btn_refresh.setText("Refreshing...")
 
-        # 1. USB Autosuspend check
-        rule_path = Path("/etc/udev/rules.d/70-synaptics-fingerprint-power.rules")
-        if rule_path.is_file():
+        # 1. Instantiate Thread and Worker
+        self.status_thread = QThread()
+        self.status_worker = StatusQueryWorker(self.fprint_mgr, self.username)
+
+        # 2. Move worker to thread
+        self.status_worker.moveToThread(self.status_thread)
+
+        # 3. Connect Signals & Slots
+        self.status_thread.started.connect(self.status_worker.run_task)
+        self.status_worker.finished.connect(self.on_status_ready)
+        self.status_worker.error.connect(self.on_status_error)
+
+        # 4. Clean Teardown
+        self.status_worker.finished.connect(self.status_thread.quit)
+        self.status_worker.finished.connect(self.status_worker.deleteLater)
+        self.status_thread.finished.connect(self.status_thread.deleteLater)
+
+        # 5. Start Thread
+        self.status_thread.start()
+
+    def on_status_ready(self, data: dict):
+        """Qt Slot called on main thread when StatusQueryWorker emits finished."""
+        self.btn_refresh.setEnabled(True)
+        self.btn_refresh.setText("🔄 Refresh Status")
+
+        # USB Power Autosuspend update
+        if data.get("usb_power_optimized"):
             self.lbl_usb_power.setText("USB Power Autosuspend: 🔵 Disabled (Optimized via udev rule)")
             self.lbl_usb_power.setStyleSheet("color: #89b4fa; font-weight: bold;")
         else:
             self.lbl_usb_power.setText("USB Power Autosuspend: ⚠️ Default (May drop scans during sleep)")
             self.lbl_usb_power.setStyleSheet("color: #f9e2af;")
 
-        # 2. Query fprintd device
-        try:
-            dev_info = self.fprint_mgr.get_default_device()
-            self.lbl_dev_name.setText(f"Device: {dev_info.get('name', 'Generic Fingerprint Scanner')}")
-            self.lbl_dev_path.setText(f"D-Bus Path: {dev_info.get('path', 'Unknown')}")
-            self.lbl_badge.setText("🟢 Device Operational")
-            self.lbl_badge.setStyleSheet("background-color: #254336; color: #a6e3a1; border-radius: 4px; padding: 4px 8px; font-weight: bold;")
-        except Exception as exc:
-            self.lbl_dev_name.setText("Device: Synaptics / Generic Reader")
-            self.lbl_dev_path.setText("D-Bus Path: /net/reactivated/Fprint/Device/0")
-            self.lbl_badge.setText("🟢 Ready")
+        # Device Info
+        self.lbl_dev_name.setText(f"Device: {data.get('dev_name')}")
+        self.lbl_dev_path.setText(f"D-Bus Path: {data.get('dev_path')}")
 
-        # 3. Query enrolled fingers
-        try:
-            fingers = self.fprint_mgr.list_enrolled_fingers(self.username)
-            if fingers:
-                friendly_names = [FINGER_MAP.get(f, f) for f in fingers]
-                self.lbl_enrolled_list.setText(f"Registered for {self.username}:\n• " + "\n• ".join(friendly_names))
-                self.lbl_enrolled_list.setStyleSheet("color: #a6e3a1; font-weight: bold;")
-                self.tray_icon.setToolTip(f"fprint-control-center: {len(fingers)} Finger(s) Enrolled ({self.username})")
-            else:
-                self.lbl_enrolled_list.setText(f"No fingerprint templates registered for '{self.username}'. Click '+ Enroll New Finger' to begin.")
-                self.lbl_enrolled_list.setStyleSheet("color: #f9e2af;")
-                self.tray_icon.setToolTip("fprint-control-center: No enrolled fingers")
-        except Exception as exc:
-            self.lbl_enrolled_list.setText(f"Status query: {exc}")
+        # Enrolled Fingers
+        fingers = data.get("enrolled_fingers", [])
+        if fingers:
+            friendly = [FINGER_MAP.get(f, f) for f in fingers]
+            self.lbl_enrolled_list.setText(f"Registered for '{self.username}':\n• " + "\n• ".join(friendly))
+            self.lbl_enrolled_list.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+            self.tray_icon.setToolTip(f"fprint-control-center: {len(fingers)} Finger(s) Enrolled")
+        else:
+            self.lbl_enrolled_list.setText(f"No fingerprint templates registered for '{self.username}'. Click '+ Enroll New Finger' to begin.")
+            self.lbl_enrolled_list.setStyleSheet("color: #f9e2af;")
+            self.tray_icon.setToolTip("fprint-control-center: No enrolled fingers")
 
-    def open_enrollment_dialog(self):
-        dialog = EnrollmentDialog(self, self.username)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.refresh_status()
+    def on_status_error(self, err_msg: str):
+        """Qt Slot called when StatusQueryWorker encounters an exception."""
+        self.btn_refresh.setEnabled(True)
+        self.btn_refresh.setText("🔄 Refresh Status")
+        self.lbl_enrolled_list.setText(f"Status query error: {err_msg}")
 
     def reset_templates(self):
         reply = QMessageBox.question(
@@ -531,40 +623,37 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            try:
-                res = subprocess.run(["fprintd-delete", self.username], capture_output=True, text=True)
-                if res.returncode == 0:
-                    QMessageBox.information(self, "Templates Reset", f"Successfully deleted all fingerprint templates for '{self.username}'.")
-                    if self.tray_icon:
-                        self.tray_icon.showMessage("Fingerprints Reset", f"All templates for {self.username} were removed.", QSystemTrayIcon.MessageIcon.Information)
-                else:
-                    QMessageBox.warning(self, "Reset Error", f"Failed to delete templates: {res.stderr or res.stdout}")
-            except Exception as exc:
-                QMessageBox.critical(self, "Error", f"An error occurred while resetting templates: {exc}")
-            finally:
-                self.refresh_status()
+            self.btn_reset.setEnabled(False)
+            self.btn_reset.setText("Deleting...")
 
-    def check_usb_autosuspend_dialog(self):
-        rule_path = Path("/etc/udev/rules.d/70-synaptics-fingerprint-power.rules")
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("USB Autosuspend Check")
-        if rule_path.is_file():
-            msg_box.setIcon(QMessageBox.Icon.Information)
-            msg_box.setText("USB Autosuspend Status: Active (power/control = on)")
-            msg_box.setInformativeText(
-                "Hardware power rule is active. Fingerprint scanner maintains power state across sleep/wake transitions, preventing PAM timeouts."
-            )
-            msg_box.setDetailedText(f"Rule file found at: {rule_path}\nContents specify power/control=on.")
+            self.reset_thread = QThread()
+            self.reset_worker = TemplateResetWorker(self.username)
+
+            self.reset_worker.moveToThread(self.reset_thread)
+            self.reset_thread.started.connect(self.reset_worker.run_task)
+            self.reset_worker.finished.connect(self.on_reset_finished)
+
+            self.reset_worker.finished.connect(self.reset_thread.quit)
+            self.reset_worker.finished.connect(self.reset_worker.deleteLater)
+            self.reset_thread.finished.connect(self.reset_thread.deleteLater)
+
+            self.reset_thread.start()
+
+    def on_reset_finished(self, success: bool, message: str):
+        self.btn_reset.setEnabled(True)
+        self.btn_reset.setText("🗑️ Reset All Templates")
+        if success:
+            QMessageBox.information(self, "Templates Reset", message)
+            if self.tray_icon:
+                self.tray_icon.showMessage("Templates Reset", message, QSystemTrayIcon.MessageIcon.Information)
         else:
-            msg_box.setIcon(QMessageBox.Icon.Warning)
-            msg_box.setText("USB Autosuspend Status: Inactive / Rule Missing")
-            msg_box.setInformativeText(
-                "The rule file /etc/udev/rules.d/70-synaptics-fingerprint-power.rules is missing.\n\n"
-                "To fix USB autosuspend drops, create the udev rule file with:\n"
-                "ACTION==\"add\", SUBSYSTEM==\"usb\", ATTR{idVendor}==\"06cb\", ATTR{idProduct}==\"00bd\", ATTR{power/control}=\"on\""
-            )
-        msg_box.exec()
+            QMessageBox.warning(self, "Reset Error", message)
         self.refresh_status()
+
+    def open_enrollment_dialog(self):
+        dialog = EnrollmentDialog(self, self.username)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.refresh_status()
 
     def closeEvent(self, event):
         event.ignore()
@@ -600,8 +689,8 @@ def main():
 
     # Tray Context Menu
     tray_menu = QMenu()
-    act_open = QAction("Open Settings / Control Center", tray_menu)
-    act_open.triggered.connect(lambda: (window.show(), window.activateWindow(), window.raise_()))
+    act_open = QAction("Open Control Center", tray_menu)
+    act_open.triggered.connect(lambda: (window.show(), window.activateWindow()))
 
     act_enroll = QAction("Enroll Finger...", tray_menu)
     act_enroll.triggered.connect(window.open_enrollment_dialog)
@@ -609,39 +698,26 @@ def main():
     act_reset = QAction("Reset Templates...", tray_menu)
     act_reset.triggered.connect(window.reset_templates)
 
-    act_usb = QAction("Check USB Autosuspend", tray_menu)
-    act_usb.triggered.connect(window.check_usb_autosuspend_dialog)
-
     act_quit = QAction("Quit", tray_menu)
     act_quit.triggered.connect(app.quit)
 
     tray_menu.addAction(act_open)
+    tray_menu.addSeparator()
     tray_menu.addAction(act_enroll)
     tray_menu.addAction(act_reset)
-    tray_menu.addAction(act_usb)
     tray_menu.addSeparator()
     tray_menu.addAction(act_quit)
 
     tray_icon.setContextMenu(tray_menu)
-
-    def on_tray_activated(reason):
-        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
-            if window.isVisible():
-                window.hide()
-            else:
-                window.show()
-                window.activateWindow()
-                window.raise_()
-
-    tray_icon.activated.connect(on_tray_activated)
+    tray_icon.activated.connect(
+        lambda reason: (window.show(), window.activateWindow()) if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick) else None
+    )
     tray_icon.show()
 
     app.aboutToQuit.connect(lock.release)
     app.aboutToQuit.connect(fprint_mgr.release_device)
 
-    # Show window initially
     window.show()
-
     sys.exit(app.exec())
 
 
