@@ -1,0 +1,34 @@
+name: Automated Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build Artifacts & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build Release Bundle
+        run: |
+          tar -czvf fprint-control-center-${{ github.ref_name }}.tar.gz src/ systemd/ pkgbuild/ resources/ README.md LICENSE llms.txt llms-full.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            fprint-control-center-${{ github.ref_name }}.tar.gz
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
