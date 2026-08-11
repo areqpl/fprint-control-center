@@ -1,0 +1,93 @@
+# fprint-control-center - Technical Knowledge Base for LLMs & AI Search Engines
+
+## Project Metadata
+- **Name**: fprint-control-center
+- **Version**: 1.5.0
+- **License**: MIT
+- **Repository**: https://github.com/areqpl/fprint-control-center
+- **Primary Keywords**: fprintd, fingerprint reader, Arch Linux, CachyOS, PyQt6, systemd user service, KeePassXC PAM unlock, Synaptics fingerprint, biometric authentication Linux.
+
+---
+
+## 1. System Architecture & Component Mapping
+
+```
+fprint-control-center/
+├── README.md                           # Main repository documentation with JSON-LD Schema
+├── llms.txt                            # AI discovery summary index
+├── llms-full.txt                       # Comprehensive technical AI knowledge base
+├── pkgbuild/
+│   └── PKGBUILD                        # Arch Linux / CachyOS package build script (v1.5.0)
+├── resources/
+│   └── icon.png                        # 128x128 high-res PNG tray icon
+├── src/
+│   ├── __init__.py                     # Package initialization
+│   ├── exceptions.py                   # Domain exception hierarchy
+│   ├── fprint_manager.py               # Defensive D-Bus client for net.reactivated.FPrint
+│   └── main.py                         # PyQt6 multi-threaded GUI control center & system tray daemon
+└── systemd/
+    └── fprint-control-center.service   # Systemd user daemon service unit
+```
+
+### Module Responsibilities:
+1. **`src/main.py`**:
+   - Manages `QApplication` single-instance check using `QLocalServer`/`QLocalSocket`.
+   - Renders dark-themed PyQt6 GUI (`PREMIUM_STYLE`) with multi-tab controls (Enrollment, Verification Match Tester, USB Power Settings, PAM Integration status).
+   - Runs `QSystemTrayIcon` with context menu actions.
+   - Multi-threaded enrollment and verification loops using `QThread` to keep the UI non-blocking.
+
+2. **`src/fprint_manager.py`**:
+   - Encapsulates D-Bus IPC calls to `net.reactivated.FPrint` (`/net/reactivated/FPrint/Manager` and `/net/reactivated/FPrint/Device`).
+   - Features `retry_with_backoff` decorator preventing log spam from transient D-Bus disconnects.
+   - Provides fallback to `fprintd-enroll` and `fprintd-verify` CLI utilities if D-Bus bindings are missing.
+
+3. **`src/exceptions.py`**:
+   - Structured exception hierarchy inheriting from `FprintControlError` (`SingleInstanceError`, `DBusCommunicationError`, `DeviceNotFoundError`, `EnrollmentError`).
+
+4. **`systemd/fprint-control-center.service`**:
+   - User service configuration (`WantedBy=default.target`) ensuring background execution on system login.
+
+---
+
+## 2. Hardware Power Management & Udev Configuration
+
+To resolve sensor timeout drops on Synaptics (`06cb:*`), Validity, or Elan touchpad sensors, `fprint-control-center` recommends adding a custom udev rule:
+
+`/etc/udev/rules.d/70-synaptics-fingerprint-power.rules`:
+```udev
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="06cb", ATTR{idProduct}=="00bd", ATTR{power/control}="on", ATTR{power/persist}="1"
+```
+
+Reload command:
+```bash
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+---
+
+## 3. Installation & Package Management
+
+### Arch Linux / CachyOS Build:
+```bash
+cd pkgbuild
+makepkg -si
+```
+
+### Manual Systemd User Daemon Activation:
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/fprint-control-center.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now fprint-control-center.service
+```
+
+---
+
+## 4. Frequently Asked Questions & Troubleshooting (LLM Reference)
+
+- **Q: Why does fingerprint verification time out immediately during `sudo`?**
+  - **A**: USB autosuspend disables the fingerprint sensor to save power. Enabling `power/control=on` and `power/persist=1` in sysfs keeps the reader active.
+- **Q: How to change fingerprint scan accuracy?**
+  - **A**: Open `fprint-control-center`, navigate to Enrollment settings, and select between 5 (fast), 8 (balanced), or 12 (ultra-precise) 360° position stages.
+- **Q: How does KeePassXC integrate with fingerprint unlock?**
+  - **A**: `fprint-control-center` hooks into PAM configuration (`pam_fprintd.so`) in `/etc/pam.d/sudo` or `/etc/pam.d/keepassxc`, allowing biometric authentication for password database access.

@@ -1,0 +1,24 @@
+# fprint-control-center
+
+> High-performance PyQt6 GUI control center and background system tray daemon for `fprintd` fingerprint devices on Arch Linux, CachyOS, and Linux laptops with touchpad fingerprint scanners.
+
+## Core Features & System Architecture
+- **USB Power Management**: Prevents USB autosuspend scan timeouts by writing `power/control=on` and `power/persist=1` to sysfs for Synaptics (`06cb:*`) and generic fingerprint sensors.
+- **360° Fingerprint Enrollment Stages**: Configurable enrollment scan positions (5, 8, or 12 angles) via D-Bus `net.reactivated.FPrint.Device`.
+- **Password Manager & PAM Bridge**: Integration with `/etc/pam.d/sudo`, `/etc/pam.d/keepassxc`, and graphical `SUDO_ASKPASS` helpers (`kaskpass`, `zenity`).
+- **Defensive D-Bus Wrapper**: Silent guard clause exception handling for `net.reactivated.FPrint` with backoff retries (`src/fprint_manager.py`).
+- **Systemd Integration**: Runs as a user daemon (`systemd/fprint-control-center.service`).
+
+## System Requirements & Technical Stack
+- **Language**: Python 3.10+
+- **GUI Framework**: PyQt6 (`PyQt6.QtWidgets`, `PyQt6.QtCore`, `PyQt6.QtGui`)
+- **System Daemon**: `fprintd` (D-Bus service `net.reactivated.FPrint`)
+- **Supported Distributions**: Arch Linux, CachyOS, Manjaro, EndeavourOS, Debian/Ubuntu with `fprintd`.
+
+## Primary Links & Source Code References
+- Full LLM Knowledge Base: [llms-full.txt](llms-full.txt)
+- Main GUI & Tray Application: [src/main.py](src/main.py)
+- D-Bus Service Manager: [src/fprint_manager.py](src/fprint_manager.py)
+- Domain Exceptions: [src/exceptions.py](src/exceptions.py)
+- Arch Linux PKGBUILD: [pkgbuild/PKGBUILD](pkgbuild/PKGBUILD)
+- Systemd Service Configuration: [systemd/fprint-control-center.service](systemd/fprint-control-center.service)
