@@ -89,12 +89,12 @@ class UnixSignalNotifier:
     def __init__(self, app: QApplication):
         self.app = app
         # Create non-blocking UNIX socket pair
-        self.read_fd, self.write_fd = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM, 0)
-        os.set_blocking(self.write_fd, False)
-        os.set_blocking(self.read_fd, False)
+        self.read_sock, self.write_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM, 0)
+        self.read_sock.setblocking(False)
+        self.write_sock.setblocking(False)
 
         # Setup Qt socket notifier on the read descriptor
-        self.notifier = QSocketNotifier(self.read_fd, QSocketNotifier.Type.Read)
+        self.notifier = QSocketNotifier(self.read_sock.fileno(), QSocketNotifier.Type.Read)
         self.notifier.activated.connect(self._handle_signal)
 
         # Register signal handlers
@@ -105,7 +105,7 @@ class UnixSignalNotifier:
     def _signal_handler_func(self, signum, frame):
         """Signal handler callback writing to socket pair."""
         try:
-            os.write(self.write_fd, bytes([signum]))
+            self.write_sock.send(bytes([signum]))
         except OSError:
             pass
 
@@ -113,7 +113,7 @@ class UnixSignalNotifier:
         """Qt slot activated when signal byte is read from socket."""
         self.notifier.setEnabled(False)
         try:
-            data = os.read(self.read_fd, 1024)
+            data = self.read_sock.recv(1024)
             if data:
                 signum = data[0]
                 try:
