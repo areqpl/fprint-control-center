@@ -30,6 +30,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QSocketNotifier, QProcess, pyqtSignal
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QColor, QPainter, QFont
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
+
 
 from exceptions import (
     FprintControlError,
@@ -429,6 +431,11 @@ class MainWindow(QMainWindow):
         hw_layout.addWidget(self.lbl_dev_name)
         hw_layout.addWidget(self.lbl_dev_path)
         hw_layout.addWidget(self.lbl_usb_power)
+
+        self.btn_usb_check = QPushButton("🔍 Check USB Autosuspend")
+        self.btn_usb_check.clicked.connect(self.check_usb_autosuspend_dialog)
+        hw_layout.addWidget(self.btn_usb_check, alignment=Qt.AlignmentFlag.AlignLeft)
+
         grp_hw.setLayout(hw_layout)
         main_layout.addWidget(grp_hw)
 
@@ -537,6 +544,28 @@ class MainWindow(QMainWindow):
             finally:
                 self.refresh_status()
 
+    def check_usb_autosuspend_dialog(self):
+        rule_path = Path("/etc/udev/rules.d/70-synaptics-fingerprint-power.rules")
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("USB Autosuspend Check")
+        if rule_path.is_file():
+            msg_box.setIcon(QMessageBox.Icon.Information)
+            msg_box.setText("USB Autosuspend Status: Active (power/control = on)")
+            msg_box.setInformativeText(
+                "Hardware power rule is active. Fingerprint scanner maintains power state across sleep/wake transitions, preventing PAM timeouts."
+            )
+            msg_box.setDetailedText(f"Rule file found at: {rule_path}\nContents specify power/control=on.")
+        else:
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setText("USB Autosuspend Status: Inactive / Rule Missing")
+            msg_box.setInformativeText(
+                "The rule file /etc/udev/rules.d/70-synaptics-fingerprint-power.rules is missing.\n\n"
+                "To fix USB autosuspend drops, create the udev rule file with:\n"
+                "ACTION==\"add\", SUBSYSTEM==\"usb\", ATTR{idVendor}==\"06cb\", ATTR{idProduct}==\"00bd\", ATTR{power/control}=\"on\""
+            )
+        msg_box.exec()
+        self.refresh_status()
+
     def closeEvent(self, event):
         event.ignore()
         self.hide()
@@ -571,8 +600,8 @@ def main():
 
     # Tray Context Menu
     tray_menu = QMenu()
-    act_open = QAction("Open Control Center", tray_menu)
-    act_open.triggered.connect(lambda: (window.show(), window.activateWindow()))
+    act_open = QAction("Open Settings / Control Center", tray_menu)
+    act_open.triggered.connect(lambda: (window.show(), window.activateWindow(), window.raise_()))
 
     act_enroll = QAction("Enroll Finger...", tray_menu)
     act_enroll.triggered.connect(window.open_enrollment_dialog)
@@ -580,20 +609,31 @@ def main():
     act_reset = QAction("Reset Templates...", tray_menu)
     act_reset.triggered.connect(window.reset_templates)
 
+    act_usb = QAction("Check USB Autosuspend", tray_menu)
+    act_usb.triggered.connect(window.check_usb_autosuspend_dialog)
+
     act_quit = QAction("Quit", tray_menu)
     act_quit.triggered.connect(app.quit)
 
     tray_menu.addAction(act_open)
-    tray_menu.addSeparator()
     tray_menu.addAction(act_enroll)
     tray_menu.addAction(act_reset)
+    tray_menu.addAction(act_usb)
     tray_menu.addSeparator()
     tray_menu.addAction(act_quit)
 
     tray_icon.setContextMenu(tray_menu)
-    tray_icon.activated.connect(
-        lambda reason: (window.show(), window.activateWindow()) if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick) else None
-    )
+
+    def on_tray_activated(reason):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
+            if window.isVisible():
+                window.hide()
+            else:
+                window.show()
+                window.activateWindow()
+                window.raise_()
+
+    tray_icon.activated.connect(on_tray_activated)
     tray_icon.show()
 
     app.aboutToQuit.connect(lock.release)

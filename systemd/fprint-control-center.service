@@ -6,10 +6,12 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/fprint-control-center
+ExecStart=/usr/bin/python3 /home/owlyyy/fprint-control-center/src/main.py
 Restart=on-failure
 RestartSec=3s
 Environment=PYTHONUNBUFFERED=1
+Environment=DISPLAY=:0
+Environment=QT_QPA_PLATFORM=xcb;wayland
 ProtectSystem=full
 PrivateTmp=true
 
