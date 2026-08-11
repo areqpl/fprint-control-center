@@ -1,35 +1,40 @@
-# fprint-control-center v1.1.0
+# fprint-control-center
 
-A production-grade PyQt6 GUI control center and daemon for managing fingerprint authentication devices on Linux via `fprintd` D-Bus interface.
+A background tray daemon and system bridge for `fprintd` on Arch Linux and CachyOS. It fixes fingerprint scanner wake-up drops, provides a PyQt6 system tray interface, and handles PAM authentication prompts.
 
-## Features & Project Architecture
+## Why this exists
 
-- **Custom Domain Exception Hierarchy (`src/exceptions.py`)**:
-  - `FprintControlError`: Base exception class.
-  - `SingleInstanceError`: Prevents multiple simultaneous daemon instances.
-  - `DBusCommunicationError`: Handles IPC and D-Bus transport failures.
-  - `DeviceNotFoundError`: Raised when fingerprint scanner hardware is absent or unplugged.
-  - `EnrollmentError`: Catches fingerprint scanning & registration errors.
+If you use fingerprint login on Linux with laptops running Synaptics sensors (like `06cb:00bd`), you've likely hit these issues:
 
-- **Defensive D-Bus Client (`src/fprint_manager.py`)**:
-  - D-Bus wrapper targeting `net.reactivated.FPrint` and `net.reactivated.FPrint.Device`.
-  - Exponential backoff retry handler (`@retry_with_backoff`) for transient IPC timeouts.
-  - Automated USB sleep/wake recovery protocol following system suspend/resume cycles.
+1. **USB Autosuspend Drops**: Linux puts the fingerprint reader to sleep to save power. When `sudo` triggers PAM, `fprintd` tries to access the sensor before it wakes up, causing instant match timeouts.
+2. **Missing Tray Feedback**: You scan your finger without knowing if `fprintd` is ready, locked out, or waiting for input.
+3. **PAM Lockups**: Unhandled D-Bus disconnects during sleep/wake cycles freeze terminal authentication.
 
-- **Robust Daemon Entry Point (`src/main.py`)**:
-  - Single-instance enforcement via `QLocalServer` lock socket.
-  - Global `sys.excepthook` for logging unhandled UI exceptions to `logging` / `journalctl` without silent crashes.
-  - Asynchronous UNIX signal handling (`SIGINT`, `SIGTERM`, `SIGHUP`) via `QSocketNotifier` for graceful Qt event loop shutdown.
+`fprint-control-center` addresses these failure modes directly:
+- Locks single-instance execution via a local socket (`QLocalServer`).
+- Retries D-Bus IPC calls (`net.reactivated.FPrint`) with exponential backoff.
+- Listens for UNIX signals (`SIGINT`, `SIGTERM`, `SIGHUP`) via non-blocking socket pairs to clean up Qt event loops.
+- Runs as an isolated systemd user unit with crash recovery.
 
-- **Hardened Systemd User Service (`systemd/fprint-control-center.service`)**:
-  - Production process isolation (`ProtectSystem=full`, `PrivateTmp=true`).
-  - Automatic crash recovery (`Restart=on-failure`, `RestartSec=3s`).
-  - Rate-limited restarts (`StartLimitIntervalSec=60s`, `StartLimitBurst=5`).
+---
 
-- **Packaging (`pkgbuild/PKGBUILD`)**:
-  - Arch Linux PKGBUILD specification updated for v1.1.0.
+## Hardware Power Fix (Required)
 
-## Repository Structure
+To stop your Synaptics sensor from dropping scans due to USB autosuspend, add a udev rule to keep power state on:
+
+```bash
+# /etc/udev/rules.d/70-synaptics-fingerprint-power.rules
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="06cb", ATTR{idProduct}=="00bd", ATTR{power/control}="on"
+```
+
+Reload udev rules:
+```bash
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+---
+
+## Repository Layout
 
 ```
 fprint-control-center/
@@ -40,44 +45,62 @@ fprint-control-center/
 │   └── icon.png
 ├── src/
 │   ├── __init__.py
-│   ├── exceptions.py
-│   ├── fprint_manager.py
-│   └── main.py
+│   ├── exceptions.py       # Domain exception hierarchy
+│   ├── fprint_manager.py   # D-Bus client wrapper with exponential backoff
+│   └── main.py             # PyQt6 tray daemon and signal handling
 └── systemd/
     └── fprint-control-center.service
 ```
 
-## Prerequisites & Dependencies
+---
 
-- Python 3.8+
-- PyQt6
-- `fprintd` (optional runtime daemon for D-Bus communication)
+## Code Architecture
 
-### Installing Dependencies
+### 1. Exception Hierarchy (`src/exceptions.py`)
+Custom domain exceptions ensure specific error handling instead of generic failures:
+- `FprintControlError`: Base exception for all errors.
+- `SingleInstanceError`: Prevents duplicate tray daemons.
+- `DBusCommunicationError`: Handles IPC connection failures.
+- `DeviceNotFoundError`: Raised when scanner hardware is missing or suspended.
+- `EnrollmentError`: Catches finger scanning and template registration errors.
 
-**Arch Linux:**
+### 2. D-Bus Manager & Retry Loop (`src/fprint_manager.py`)
+Wraps `net.reactivated.FPrint` using an exponential backoff decorator:
+```python
+def retry_with_backoff(max_retries=5, initial_delay=1.0, backoff_factor=2.0):
+    # Retries transient D-Bus timeouts before raising DBusCommunicationError
+```
+
+### 3. Application Lifecycle (`src/main.py`)
+- **Single Instance Socket**: Uses `QLocalServer` (`fprint-control-center-lock-<user>`). If an instance exists, new launches exit immediately with code `0`.
+- **Global Error Hook**: Overrides `sys.excepthook` to write stack traces directly to `journalctl` / `sys.stderr` and present an alert dialog rather than crashing silently.
+- **Signal Safety**: Uses `socket.socketpair()` wired into `QSocketNotifier` to handle `SIGINT` and `SIGTERM` inside the Qt main loop.
+
+---
+
+## Quickstart
+
+### Prerequisites
+
+On Arch Linux / CachyOS:
 ```bash
 sudo pacman -S python-pyqt6 fprintd
 ```
 
-**Using pip:**
-```bash
-pip install PyQt6 dbus-python
-```
+### Manual Run
 
-## Launching the Application
-
-Run directly from the repository root:
+Run directly from source to verify:
 ```bash
 python3 src/main.py
 ```
 
-## Deployment Instructions
+---
 
-### 1. Systemd User Service Deployment
+## Installation & Deployment
 
-To install and run `fprint-control-center` as a background user service:
+### 1. Enable Systemd User Unit
 
+Copy the service unit and start it:
 ```bash
 mkdir -p ~/.config/systemd/user
 cp systemd/fprint-control-center.service ~/.config/systemd/user/
@@ -85,16 +108,21 @@ systemctl --user daemon-reload
 systemctl --user enable --now fprint-control-center.service
 ```
 
-To view live service logs in journald:
+Check live logs:
 ```bash
 journalctl --user -u fprint-control-center.service -f
 ```
 
-### 2. Arch Linux Package Installation (PKGBUILD)
+### 2. Build & Install via PKGBUILD
 
-To build and install the package locally:
-
+To build a native Arch package:
 ```bash
 cd pkgbuild
 makepkg -si
 ```
+
+---
+
+## License
+
+MIT License. See file header for details.
